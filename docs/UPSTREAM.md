@@ -23,7 +23,7 @@ key; never commit it.
 snapshot, **not an executable HomeTTY installer**. Its mutable remote downloads,
 stock Termux binaries, release APKs, and configuration file are not run. The
 adaptation in `DesktopCatalog` retains all 14 desktop choices and uses HomeTTY
-TOML. Hardware acceleration, themes, package recipes and companion builds are
+TOML. Hardware acceleration, themes, package recipes are
 still pending (see STATUS.md). The upstream GPL license is retained beside it.
 
 Research references:
@@ -32,3 +32,27 @@ Research references:
 - [Android widget hosting](https://developer.android.com/develop/ui/views/appwidgets/host)
 - [Shizuku API and provider permission model](https://github.com/RikkaApps/Shizuku-API)
 - [Open-Meteo API](https://open-meteo.com/en/docs)
+
+## HomeTTY companion sources
+
+The imported source modules preserve their upstream notices and READMEs. Their
+package identity, prefix, permissions and shared UID target HomeTTY; Java class
+names remain upstream names. They depend on the local adapted termux-shared,
+rather than a stock shared-library artifact. All companion debug APKs use the same local
+SDK signing key. No upstream public signing key was imported.
+
+| Companion | Revision | Module |
+| --- | --- | --- |
+| https://github.com/termux/termux-api | `fc26ce17e3badf85d4df191af364fcf7798047f1` | `:hometty-api` |
+| https://github.com/termux/termux-widget | `b3aacb8175fb2d7167ce8d1ad6817087498aa044` | `:hometty-widget` |
+| https://github.com/termux/termux-tasker | `dbf685fe2973c3490a27cbd37f31909ad5eb3bb3` | `:hometty-tasker` |
+| https://github.com/termux/termux-x11 | `fa3a8b430e2896a19f44c99a9cb056254615ae06` | Standalone `companions/x11`; all-ABI native build and CLI packages |
+
+API command-line helpers must be rebuilt for the custom application prefix and
+broadcast to `com.hazemtech.termux.hometty.api/com.termux.api.TermuxApiReceiver`.
+APK assembly and matching signatures alone do not verify those Linux helpers.
+
+The pinned X11 native dependencies are recorded as Git submodules in .gitmodules.
+Run scripts/build_debug.sh to build X11 and bundle all four companion APKs.
+Package builds use termux-packages `e950269dd7ad5d06069281c9b4d83559800c70e1`
+and builder digest `sha256:44999857244619e25bc8e3427904a16d36cc0c0e087704af039e5bdf94814ac9`.

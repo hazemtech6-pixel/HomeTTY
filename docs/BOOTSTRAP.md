@@ -47,9 +47,12 @@ packaging. A manifest is a build-producer attestation, not proof that every
 package was correctly rebuilt. Test actual executables and package installation
 on Android. `clean` does not delete supplied custom archives.
 
-The current workstation has no custom-prefix archives or repository. Docker is
-installed but the current user cannot access its socket. A complete desktop and
-companion distribution remains blocked on a usable package-build environment,
-rebuild work, common private signing, and Android validation. No stock package
-fallback is allowed. Granting Docker access is an administrative decision; this
-project does not change host groups, daemon permissions or system configuration.
+Run `scripts/build_bootstraps.sh` with Docker access to build the pinned package
+sources in the digest-pinned upstream builder. The script mounts only isolated
+project build directories and does not change host permissions or kernel settings.
+`HOMETTY_BUILD_ARCHITECTURES` selects architectures (all four by default); x86_64
+runs first for emulator verification. Containers and caches remain for diagnosis.
+The overlay changes the application/API identities while retaining Java namespaces,
+disables stock apt sources and stock mirror selection, and includes Python/API
+helpers. This workflow is under verification; no custom archive is available yet.
+A signed custom repository and desktop packages still need implementation.

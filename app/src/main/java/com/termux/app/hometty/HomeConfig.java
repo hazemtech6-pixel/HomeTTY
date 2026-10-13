@@ -28,6 +28,18 @@ public final class HomeConfig {
             if (result.contains(key) && !(result.get(key) instanceof Boolean)) throw new IllegalArgumentException(key + " must be true or false");
         if (result.contains("home.columns") && (!(result.get("home.columns") instanceof Long) || result.getLong("home.columns") < 2 || result.getLong("home.columns") > 8))
             throw new IllegalArgumentException("home.columns must be between 2 and 8");
+        for (String key : new String[]{"weather.latitude", "weather.longitude"}) {
+            if (result.contains(key)) {
+                Object value = result.get(key);
+                double limit = key.endsWith("latitude") ? 90 : 180;
+                if (!(value instanceof Number) || !Double.isFinite(((Number)value).doubleValue()) || Math.abs(((Number)value).doubleValue()) > limit)
+                    throw new IllegalArgumentException(key + " must be a finite coordinate between -" + limit + " and " + limit);
+            }
+        }
+        if (result.contains("desktop.backend") && !java.util.Arrays.asList("x11", "vnc").contains(result.get("desktop.backend")))
+            throw new IllegalArgumentException("desktop.backend must be x11 or vnc");
+        if (result.contains("desktop.environment") && !java.util.Arrays.asList("xfce", "lxqt", "openbox", "mate", "gnome", "cinnamon", "plasma", "i3wm", "dwm", "bspwm", "awesome", "fluxbox", "icewm", "wmaker").contains(result.get("desktop.environment")))
+            throw new IllegalArgumentException("Unknown desktop.environment");
         for (String key : result.dottedKeySet()) {
             String lower = key.toLowerCase(java.util.Locale.ROOT);
             if (lower.endsWith("api_key") || lower.endsWith("password") || lower.endsWith("secret") || lower.endsWith("token"))

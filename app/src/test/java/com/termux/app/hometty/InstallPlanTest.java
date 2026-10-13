@@ -30,4 +30,9 @@ public class InstallPlanTest {
         try { plan().restore(p); fail(); } catch (IllegalArgumentException expected) {}
     }
     @Test public void cancelledStepRequiresExplicitRetry() { InstallPlan a=plan(); a.current().start("pty"); a.current().cancel(); assertEquals(InstallPlan.Status.CANCELLED,a.current().status()); a.current().retry(); assertEquals(InstallPlan.Status.PENDING,a.current().status()); }
+    @Test public void olderPlanRetainsCompletedWorkWhenOptionalCompanionStepsAreAdded() {
+        InstallPlan old=plan(); old.current().start("pty"); old.current().exited(0);
+        InstallPlan migrated=new InstallPlan(Arrays.asList(new InstallPlan.Step("required","Required","echo ok",80,false),new InstallPlan.Step("api","API","companion:api",10,true),new InstallPlan.Step("optional","Optional","echo optional",20,true)));
+        migrated.restore(old.snapshot()); assertEquals(InstallPlan.Status.SUCCEEDED,migrated.steps.get(0).status()); assertEquals("api",migrated.current().id);
+    }
 }

@@ -20,6 +20,7 @@ import java.util.*;
 /** Android HOME surface; the original Termux activity continues to own the terminal. */
 public final class HomeActivity extends Activity {
     private HomeConfig config;
+    private String loadedConfiguration;
     private LauncherState state;
     private LinearLayout root, content, tabs;
     private String selected = "Home";
@@ -27,7 +28,7 @@ public final class HomeActivity extends Activity {
     private int pendingWidget = -1;
     private Runnable afterAuthentication;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16;
+    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17;
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) { if ("Apps".equals(selected) || "Home".equals(selected)) show(selected); }
     };
@@ -36,12 +37,16 @@ public final class HomeActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         getWindow().setBackgroundDrawableResource(android.R.color.transparent);
         if (saved != null) { selected = saved.getString("tab", "Home"); pendingWidget = saved.getInt("widget", -1); }
-        try { config = new HomeConfig(); state = new LauncherState(); }
+        try { config = new HomeConfig(); loadedConfiguration = HomeConfig.read(); state = new LauncherState(); }
         catch (Exception e) { configurationError(e); return; }
         widgets = new AppWidgetHost(this, 1024);
         IntentFilter filter = new IntentFilter(); filter.addAction(Intent.ACTION_PACKAGE_ADDED); filter.addAction(Intent.ACTION_PACKAGE_REMOVED); filter.addAction(Intent.ACTION_PACKAGE_CHANGED); filter.addDataScheme("package");
         registerReceiver(packages, filter);
         build();
+        if (!Boolean.parseBoolean(state.get("setup.presented","false"))) {
+            put("setup.presented","true");
+            open(new Intent(this,com.termux.app.SetupActivity.class));
+        }
     }
     private void configurationError(Exception e) {
         LinearLayout recovery = new LinearLayout(this); recovery.setOrientation(LinearLayout.VERTICAL); recovery.setPadding(24,24,24,24); setContentView(recovery);
@@ -53,6 +58,16 @@ public final class HomeActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();
+        if (config != null) {
+            try {
+                String current = HomeConfig.read();
+                if (!current.equals(loadedConfiguration)) {
+                    config = new HomeConfig(); loadedConfiguration = current;
+                    if ("AI".equals(selected) && !config.flag("ai.enabled", false)) selected = "Home";
+                    build();
+                }
+            } catch (Exception error) { config = null; configurationError(error); }
+        }
         if (config!=null && "Settings".equals(selected)) ActivityLock.resume(this,"security.lock_settings");
     }
     @Override protected void onStart() { super.onStart(); if (widgets != null) widgets.startListening(); }
@@ -187,8 +202,22 @@ public final class HomeActivity extends Activity {
         action("Bluetooth", () -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
         action("Android system shell", () -> terminal(true));
         action("Plugins and sources", this::plugins);
+        action("HomeTTY companions", this::companions);
         action("Privilege providers", this::privilege);
         if (config.flag("privilege.rish", false)) action("RISH", () -> confirm("Start RISH with the privileges granted by your Shizuku provider?", () -> ShellCommands.run(this,"rish")));
+    }
+    private void companions() {
+        content.removeAllViews(); text("HomeTTY companions",26);
+        for (String name:CompanionInstaller.NAMES) {
+            boolean installed=CompanionInstaller.installed(this,name);
+            if (!installed && !CompanionInstaller.bundled(this,name)) { text(name.toUpperCase(Locale.ROOT)+" · Not included in this build",14); continue; }
+            action(name.toUpperCase(Locale.ROOT)+(installed ? " · Installed" : " · Install"), () -> {
+                if (installed) { Intent launch=getPackageManager().getLaunchIntentForPackage(getPackageName()+"."+name); if (launch!=null) open(launch); else toast("This companion has no launcher activity"); return; }
+                confirm("Install HomeTTY:"+name+"? Android will request permission and installation consent.", () -> { try { CompanionInstaller.request(this,name); } catch (Exception e) { toast(e.getMessage()); } });
+            });
+        }
+
+        action("Refresh",this::companions);
     }
     private void privilege() {
         content.removeAllViews(); text("Privilege providers",26); text(PrivilegeBackends.describe(this),16);
@@ -218,13 +247,30 @@ public final class HomeActivity extends Activity {
     private void settings() {
         text("Settings",26); text("~/.config/hometty/config.toml",14);
         EditText editor = new EditText(this); editor.setTextColor(Color.WHITE); editor.setTypeface(android.graphics.Typeface.MONOSPACE); editor.setGravity(Gravity.TOP);
-        try { editor.setText(HomeConfig.read()); } catch (IOException e) { toast(e.getMessage()); }
+        final String baseline;
+        try { baseline = HomeConfig.read(); editor.setText(baseline); } catch (IOException e) { toast(e.getMessage()); return; }
         content.addView(editor);
-        action("Validate and save", () -> { try { HomeConfig.save(editor.getText().toString()); config = new HomeConfig(); selected = "Home"; build(); } catch (Exception e) { toast(e.getMessage()); } });
+        action("Validate and save", () -> { try { if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed externally; reopen Settings before saving"); HomeConfig.save(editor.getText().toString()); loadedConfiguration = HomeConfig.read(); config = new HomeConfig(); selected = "Home"; build(); } catch (Exception e) { toast(e.getMessage()); } });
+        action("Settings TUI", this::settingsTui);
         action("Edit in terminal", () -> ShellCommands.run(this,"${EDITOR:-vi} \"$HOME/.config/hometty/config.toml\""));
         action("Back up configuration", () -> openForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/toml").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"hometty-config.toml"),BACKUP));
         action("Restore configuration", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),RESTORE));
         action("Terminal preferences", () -> open(new Intent(this,com.termux.app.activities.SettingsActivity.class)));
+    }
+    private void settingsTui() {
+        File python = new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH, "bin/python3");
+        if (!python.canExecute()) { toast("Install the rebuilt HomeTTY Python package to use the settings TUI"); return; }
+        File directory = new File(HomeConfig.DATA, "bin");
+        if (!directory.isDirectory() && !directory.mkdirs()) { toast("Cannot create TUI directory"); return; }
+        File target = new File(directory, "settings.py");
+        android.util.AtomicFile file = new android.util.AtomicFile(target);
+        FileOutputStream output = null;
+        try (InputStream input = getAssets().open("hometty_settings.py")) {
+            output = file.startWrite(); byte[] buffer = new byte[8192]; int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            file.finishWrite(output); output = null;
+            ShellCommands.run(this, python.getAbsolutePath() + " '" + target.getAbsolutePath() + "'");
+        } catch (IOException error) { if (output != null) file.failWrite(output); toast(error.getMessage()); }
     }
     private void media() {
         try {
@@ -301,7 +347,7 @@ public final class HomeActivity extends Activity {
         afterAuthentication = next; openForResult(intent,AUTHENTICATE);
     }
     private void requestHome() {
-        if (Build.VERSION.SDK_INT >= 29) { RoleManager roles = getSystemService(RoleManager.class); if (roles.isRoleAvailable(RoleManager.ROLE_HOME) && !roles.isRoleHeld(RoleManager.ROLE_HOME)) { open(roles.createRequestRoleIntent(RoleManager.ROLE_HOME)); return; } }
+        if (Build.VERSION.SDK_INT >= 29) { RoleManager roles = getSystemService(RoleManager.class); if (roles.isRoleAvailable(RoleManager.ROLE_HOME) && !roles.isRoleHeld(RoleManager.ROLE_HOME)) { openForResult(roles.createRequestRoleIntent(RoleManager.ROLE_HOME),REQUEST_HOME); return; } }
         open(new Intent(Settings.ACTION_HOME_SETTINGS));
     }
     private ArrayList<Integer> widgetIds() { ArrayList<Integer> result = new ArrayList<>(); for (String id : state.get("widgets","").split(",")) try { result.add(Integer.parseInt(id)); } catch (NumberFormatException ignored) {} return result; }
@@ -310,6 +356,10 @@ public final class HomeActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
         if (ActivityLock.result(this,request,result)) return;
+        if (request==REQUEST_HOME) {
+            if (Build.VERSION.SDK_INT>=29 && getSystemService(RoleManager.class).isRoleHeld(RoleManager.ROLE_HOME)) toast("HomeTTY is your default Home");
+            return;
+        }
         if ((request==BACKUP || request==RESTORE || request==IMPORT_PLUGIN) && result==RESULT_OK && data!=null && data.getData()!=null) {
             try {
                 if (request==BACKUP) { try (OutputStream out=getContentResolver().openOutputStream(data.getData(),"wt")) { if (out==null) throw new IOException("Cannot open destination"); out.write(HomeConfig.read().getBytes(java.nio.charset.StandardCharsets.UTF_8)); } toast("Configuration backed up; secrets and runtime grants are excluded"); }

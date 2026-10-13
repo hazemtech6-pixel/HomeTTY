@@ -52,6 +52,7 @@ public final class InstallPlan {
         if (!"1".equals(p.getProperty("version"))) throw new IllegalArgumentException("Unsupported installer state version");
         for (Step step : steps) {
             String prefix=step.id+".";
+            if (!p.containsKey(prefix+"command") && step.optional) continue;
             if (!step.command.equals(p.getProperty(prefix+"command"))) throw new IllegalArgumentException("Installer plan changed; review required");
             step.status=Status.valueOf(p.getProperty(prefix+"status")); step.progress=Integer.parseInt(p.getProperty(prefix+"progress"));
             if (step.progress<0 || step.progress>100) throw new IllegalArgumentException("Corrupt progress");

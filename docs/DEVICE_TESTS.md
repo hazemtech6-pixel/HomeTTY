@@ -56,3 +56,28 @@ Physical-device checks remain required even after emulator smoke tests.
 Host and build results are recorded in STATUS.md. Device results will be added
 below only after execution. No physical Android device was attached at initial
 inspection of this continuation.
+
+### Android emulator — 2026-10-13
+
+Android 10/API 29, x86_64 default AOSP emulator, KVM, development APK from this
+continuation (including uncommitted companion integration at test time):
+
+- HomeTTY installs and its Home activity launches without a crash.
+- Android system-shell PTY accepts `echo HOMETTY_PTY_OK` and displays the output.
+- Setup probe displays progress and command output, then persists the successful
+  Android step and its output log under XDG data.
+- `PtyInstallerTest.interactivePromptKeepsSamePtyAcrossInstallerStateRestore`:
+  passed against a real `/system/bin/sh` PTY. WAITING_FOR_USER kept the process
+  alive; state restore retained its handle; input completed with exit status 0.
+- HomeTTY:API bundled installer verifies identity/signature, routes to Android's
+  unknown-source permission screen, waits without failure, presents Android's
+  install confirmation, installs, and advances persistent weighted progress.
+
+- Widget and Tasker also installed through the bundled Android consent flow.
+- Android HOME-role dialog granted HomeTTY; pressing Home returned to HomeTTY and
+  the role remained assigned in Android role-manager state.
+- HomeTTY:X11 debug APK installed using adb and its activity opened without a
+  crash. No desktop frame/CLI connection has been verified.
+
+The other checklist entries remain pending unless separately recorded. These
+results do not establish behavior on physical devices or with rebuilt packages.

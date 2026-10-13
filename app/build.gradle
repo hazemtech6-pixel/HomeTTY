@@ -45,6 +45,7 @@ android {
 
     defaultConfig {
         applicationId "com.hazemtech.termux.hometty"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
         versionCode 118
@@ -141,6 +142,9 @@ android {
 }
 
 dependencies {
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    androidTestImplementation "androidx.test:runner:1.6.2"
+    androidTestImplementation "androidx.test:rules:1.6.1"
     testImplementation "junit:junit:4.13.2"
     testImplementation "org.robolectric:robolectric:4.10"
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:1.1.5"
@@ -169,3 +173,41 @@ tasks.register("prepareHomeTTYBootstrap", Exec) {
         bootstrapDir.getOrElse(""), project.file("src/main/cpp")
 }
 tasks.named("preBuild").configure { dependsOn("prepareHomeTTYBootstrap") }
+
+// Bundle companions built from the pinned sources and signed by the same local
+// debug identity. Android still requires consent for each APK installation.
+def x11CompanionApk = providers.environmentVariable("HOMETTY_X11_APK")
+def companionAssets = layout.buildDirectory.dir("generated/homettyCompanions/debug")
+def bundleCompanions = tasks.register("bundleHomeTTYDebugCompanions") {
+    dependsOn(":hometty-api:assembleDebug", ":hometty-widget:assembleDebug", ":hometty-tasker:assembleDebug")
+    ["api", "widget", "tasker"].each { name ->
+        inputs.files(project(":hometty-${name}").layout.buildDirectory.dir("outputs/apk/debug"))
+    }
+    inputs.property("includesX11", x11CompanionApk.isPresent())
+    if (x11CompanionApk.isPresent()) inputs.file(x11CompanionApk)
+    outputs.dir(companionAssets)
+    doLast {
+        def output = companionAssets.get().dir("companions").asFile
+        output.mkdirs()
+        def oldX11 = new File(output, "x11.apk")
+        if (oldX11.exists() && !oldX11.delete()) throw new GradleException("Cannot replace generated X11 companion asset")
+        if (x11CompanionApk.isPresent()) {
+            def x11 = file(x11CompanionApk.get())
+            if (!x11.isFile()) throw new GradleException("HOMETTY_X11_APK must point to the built HomeTTY shared-UID X11 APK")
+            copy { from x11; into output; rename { "x11.apk" } }
+        }
+        ["api", "widget", "tasker"].each { name ->
+            def apks = fileTree(project(":hometty-${name}").layout.buildDirectory.dir("outputs/apk/debug")) {
+                include "*.apk"
+            }.files
+            if (apks.size() != 1) throw new GradleException("Expected exactly one ${name} companion APK")
+            copy { from apks.first(); into output; rename { "${name}.apk" } }
+        }
+    }
+}
+android.sourceSets.debug.assets.srcDir(bundleCompanions)
+tasks.matching { it.name == "mergeDebugAssets" }.configureEach { dependsOn(bundleCompanions) }
+// AGP's lint model reads generated asset directories separately from mergeAssets.
+tasks.matching { it.name.contains("Debug") && it.name.toLowerCase(java.util.Locale.ROOT).contains("lint") }.configureEach {
+    dependsOn(bundleCompanions)
+}

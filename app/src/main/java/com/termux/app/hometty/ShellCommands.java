@@ -18,6 +18,7 @@ final class ShellCommands {
     private static void dispatch(Context context,String shell,String[] arguments) {
         Intent intent = new Intent(context, TermuxService.class).setAction(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE)
             .setData(Uri.parse(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE + ":" + shell))
+            .putExtra(TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY.EXTRA_FAILSAFE_SESSION, "/system/bin/sh".equals(shell))
             .putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS,arguments)
             .putExtra(TERMUX_SERVICE.EXTRA_WORKDIR,TermuxConstants.TERMUX_HOME_DIR_PATH)
             .putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND,false)

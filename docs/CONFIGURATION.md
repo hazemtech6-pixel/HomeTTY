@@ -70,3 +70,10 @@ pending.
 Configuration backup/restore uses Android's document picker. Backups exclude
 Keystore ciphertext, grants, widget IDs, runtime state and the terminal filesystem.
 Restore parses the whole file and asks before replacing existing configuration.
+
+The Settings TUI button stages the bundled Python/curses editor and runs it in the
+retained PTY using HomeTTY's rebuilt Python. It reads the same config.toml, preserves
+comments and unknown fields, and refuses concurrent overwrites. Arrow keys/j/k select,
+Enter edits, s saves with confirmation, e opens the full editor, r reloads and q quits.
+Native Settings reloads validated external changes when resumed. Android TUI runtime
+verification remains pending the custom-prefix Python build.

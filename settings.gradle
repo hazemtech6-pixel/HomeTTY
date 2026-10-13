@@ -1,1 +1,8 @@
 include ':app', ':termux-shared', ':terminal-emulator', ':terminal-view'
+
+include ':hometty-api'
+project(':hometty-api').projectDir = file('companions/api')
+include ':hometty-widget'
+project(':hometty-widget').projectDir = file('companions/widget')
+include ':hometty-tasker'
+project(':hometty-tasker').projectDir = file('companions/tasker')
