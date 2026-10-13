@@ -57,6 +57,11 @@ public class RunCommandService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Logger.logDebug(LOG_TAG, "onStartCommand");
+        if (com.termux.app.hometty.ActivityLock.enabled("security.lock_terminal")) {
+            Logger.logWarn(LOG_TAG, "External command rejected while HomeTTY terminal lock is enabled");
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
 
         if (intent == null) return Service.START_NOT_STICKY;
 

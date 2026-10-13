@@ -37,3 +37,9 @@ local.properties
 .swp
 ehthumbs.db
 Thumbs.db
+
+# Local development toolchains and private signing material
+.toolchain/
+*.jks
+*.keystore
+__pycache__/

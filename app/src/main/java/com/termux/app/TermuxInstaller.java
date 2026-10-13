@@ -63,6 +63,12 @@ final class TermuxInstaller {
 
     /** Performs bootstrap setup if necessary. */
     static void setupBootstrapIfNeeded(final Activity activity, final Runnable whenDone) {
+        if (!com.termux.BuildConfig.HOMETTY_HAS_BOOTSTRAP) {
+            new AlertDialog.Builder(activity).setTitle("HomeTTY bootstrap unavailable")
+                .setMessage("This development APK has no packages rebuilt for HomeTTY. Stock Termux packages are incompatible. The Android system shell is available from HomeTTY Tools.")
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> activity.finish()).show();
+            return;
+        }
         String bootstrapErrorMessage;
         Error filesDirectoryAccessibleError;
 

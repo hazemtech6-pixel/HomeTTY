@@ -46,6 +46,10 @@ public class SettingsActivity extends AppCompatActivity {
         AppCompatActivityUtils.setShowBackButtonInActionBar(this, true);
     }
 
+    @Override protected void onResume() { super.onResume(); com.termux.app.hometty.ActivityLock.resume(this,"security.lock_settings"); }
+    @Override protected void onStop() { com.termux.app.hometty.ActivityLock.stop(this); super.onStop(); }
+    @Override protected void onActivityResult(int request,int result,android.content.Intent data) { super.onActivityResult(request,result,data); com.termux.app.hometty.ActivityLock.result(this,request,result); }
+
     @Override
     public boolean onSupportNavigateUp() {
         onBackPressed();

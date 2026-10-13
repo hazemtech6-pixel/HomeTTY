@@ -59,3 +59,16 @@ checks for HOME, permissions, icons, widgets, shortcuts, storage, authentication
 PTY prompt handoff, desktop/X11/VNC, Shizuku providers and signed companion installs.
 Do not label scaffolding or placeholders as complete functionality. Preserve scope
 and provide an exact implementation/status matrix and reproducible build commands.
+
+## Recorded implementation decisions (2026-10-13)
+
+- Retain upstream Java namespaces and JNI names; distinguish them from HomeTTY's
+  Android application ID, permissions, companion IDs and private prefix.
+- Support Android 7.0+ (API 24), matching the supported Termux package baseline.
+- Allow an explicitly identified development APK without a bootstrap for launcher
+  testing. It offers the Android system shell and must not claim package/desktop
+  support. Full distribution requirements above remain unchanged.
+- Use full TOML parsing and atomic writes. Initial plugin actions are declarative,
+  and capability grants bind to a manifest digest so changes require review.
+- Debug builds use the local SDK debug key. Production and companions require a
+  shared private signing identity, kept outside Git.

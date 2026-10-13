@@ -1,0 +1,25 @@
+{
+  "applicationId": "com.hazemtech.termux.hometty",
+  "companions": [
+    {
+      "name": "api",
+      "repository": "https://github.com/termux/termux-api.git",
+      "revision": "fc26ce17e3badf85d4df191af364fcf7798047f1"
+    },
+    {
+      "name": "widget",
+      "repository": "https://github.com/termux/termux-widget.git",
+      "revision": "b3aacb8175fb2d7167ce8d1ad6817087498aa044"
+    },
+    {
+      "name": "tasker",
+      "repository": "https://github.com/termux/termux-tasker.git",
+      "revision": "dbf685fe2973c3490a27cbd37f31909ad5eb3bb3"
+    },
+    {
+      "name": "x11",
+      "repository": "https://github.com/termux/termux-x11.git",
+      "revision": "fa3a8b430e2896a19f44c99a9cb056254615ae06"
+    }
+  ]
+}

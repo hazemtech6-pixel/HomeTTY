@@ -305,6 +305,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     public void onResume() {
         super.onResume();
 
+        com.termux.app.hometty.ActivityLock.resume(this,"security.lock_terminal");
         Logger.logVerbose(LOG_TAG, "onResume");
 
         if (mIsInvalidState) return;
@@ -326,6 +327,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     protected void onStop() {
         super.onStop();
 
+        com.termux.app.hometty.ActivityLock.stop(this);
         Logger.logDebug(LOG_TAG, "onStop");
 
         if (mIsInvalidState) return;
@@ -396,6 +398,10 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
         if (mTermuxService.isTermuxSessionsEmpty()) {
             if (mIsVisible) {
+                if (intent != null && intent.getBooleanExtra(TERMUX_ACTIVITY.EXTRA_FAILSAFE_SESSION, false)) {
+                    mTermuxTerminalSessionActivityClient.addNewSession(true, "Android system shell");
+                    return;
+                }
                 TermuxInstaller.setupBootstrapIfNeeded(TermuxActivity.this, () -> {
                     if (mTermuxService == null) return; // Activity might have been destroyed.
                     try {
@@ -598,7 +604,8 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
 
 
-    @SuppressLint("RtlHardcoded")
+    // Deliberately finish the activity while preserving the service-owned PTY.
+    @SuppressLint({"RtlHardcoded", "MissingSuperCall"})
     @Override
     public void onBackPressed() {
         if (getDrawer().isDrawerOpen(Gravity.LEFT)) {
@@ -792,6 +799,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (com.termux.app.hometty.ActivityLock.result(this,requestCode,resultCode)) return;
         Logger.logVerbose(LOG_TAG, "onActivityResult: requestCode: " + requestCode + ", resultCode: "  + resultCode + ", data: "  + IntentUtils.getIntentString(data));
         if (requestCode == PermissionUtils.REQUEST_GRANT_STORAGE_PERMISSION) {
             requestStoragePermission(true);
