@@ -90,5 +90,10 @@ continuation (including uncommitted companion integration at test time):
 - The real PTY prompt/state test also verifies preserved raw prompt and answer
   output in the session-owned setup log.
 
+- Ollama client fixture-server instrumentation passed: AI disabled opened no
+  connection; explicit enable sent the configured model/messages without tools
+  and displayed a completed protocol response. Real server/model, credentials,
+  redirects, cancellation and full frontend lifecycle still need checks.
+
 The other checklist entries remain pending unless separately recorded. These
 results do not establish behavior on physical devices or with rebuilt packages.

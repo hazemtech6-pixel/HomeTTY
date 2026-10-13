@@ -40,6 +40,8 @@ public final class HomeConfig {
             throw new IllegalArgumentException("desktop.backend must be x11 or vnc");
         if (result.contains("desktop.environment") && !java.util.Arrays.asList("xfce", "lxqt", "openbox", "mate", "gnome", "cinnamon", "plasma", "i3wm", "dwm", "bspwm", "awesome", "fluxbox", "icewm", "wmaker").contains(result.get("desktop.environment")))
             throw new IllegalArgumentException("Unknown desktop.environment");
+        if (result.contains("ai.backend") && !java.util.Arrays.asList("external", "ollama").contains(result.get("ai.backend"))) throw new IllegalArgumentException("ai.backend must be external or ollama");
+        for (String key : new String[]{"ai.endpoint","ai.model","ai.external_command"}) if (result.contains(key) && !(result.get(key) instanceof String)) throw new IllegalArgumentException(key+" must be text");
         for (String key : result.dottedKeySet()) {
             String lower = key.toLowerCase(java.util.Locale.ROOT);
             if (lower.endsWith("api_key") || lower.endsWith("password") || lower.endsWith("secret") || lower.endsWith("token"))

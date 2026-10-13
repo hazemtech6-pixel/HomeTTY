@@ -42,6 +42,7 @@
     <queries><intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent></queries>
 
     <application
+        android:networkSecurityConfig="@xml/hometty_network_security"
         android:name=".app.TermuxApplication"
         android:allowBackup="false"
         android:banner="@drawable/banner"

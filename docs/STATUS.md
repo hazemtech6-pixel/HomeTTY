@@ -20,7 +20,7 @@ HomeTTY's rules/specification; this continuation adds native launcher integratio
 | Companions | Pinned API, Widget, Tasker and X11 sources adapted and built; X11 native libraries built for all four ABIs; matching debug signer; bundled consent-based install flow; X11 routing distinguishes original Termux | Private production signer, CLI helpers rebuilt for the custom prefix, full companion device checks |
 | Privilege | Shizuku API binder/permission capability discovery without manager-package whitelist; authorization request; root detection/diagnostic/reboot with confirmation; optional RISH | RISH export/bundling, full operational backend abstraction and device/provider validation |
 | Locks/secrets | Android device-credential UI gates; direct terminal/settings/setup entry guards; external RUN_COMMAND lock check; optional password/PIN enrollment/removal behind device credentials; Keystore-encrypted salted PBKDF2 record; persistent retry delay; background verification | Password UI/lifecycle/device regression checks, complete shell-widget lock handoff; Keystore helper not wired to AI frontend |
-| AI | Entirely absent by default; explicit enable exposes terminal-agent entry | Built-in optional frontend, agent setup and key-management UI |
+| AI | Entirely absent by default; configured external agent command; optional Ollama chat frontend with cancel, memory-only history and endpoint-bound Keystore credentials | Real model/server and physical-device checks, external agent package setup, additional provider adapters |
 | Plugins | Declarative TOML local imports, app/web/shell actions, explicit content-bound grants, revocation, per-shell-run confirmation, inert HTTPS source registration | Widget/tab/theme/integration plugins, registry/GitHub catalog browsing, update management, package sandboxing |
 | Backup/update | SAF configuration-only backup/validated restore | Full-state/files backup, migration, companion/package/plugin/application updates |
 
@@ -29,9 +29,9 @@ HomeTTY's rules/specification; this continuation adds native launcher integratio
 - Python bootstrap boundary tests: 5 passed. Settings TUI logic tests: 5 passed. Signed repository tests: 2 passed.
 - Android debug APK assembly: successful for arm64-v8a, armeabi-v7a, x86,
   x86_64 and universal.
-- Upstream terminal-emulator host tests: 145 passed. Application host tests: 29 passed.
+- Upstream terminal-emulator host tests: 145 passed. Application host tests: 30 passed.
 - `:app:lintDebug`: passed, with existing and new nonfatal warnings (including English UI strings needing localization).
-- Android 10 x86_64 emulator: Home startup, real system-shell input/output, installer Android probe/state/log, real PTY prompt/state restore/raw output, SAF create/rename/read/path checks, Keystore tamper rejection, and asynchronous desktop search instrumentation passed (4 tests).
+- Android 10 x86_64 emulator: Home startup, real system-shell input/output, installer Android probe/state/log, real PTY prompt/state restore/raw output, SAF create/rename/read/path checks, Keystore tamper rejection, and asynchronous desktop search instrumentation passed (5 tests, including disabled-AI no-network and Ollama protocol checks against a local fixture server).
 - API, Widget and Tasker installed through Android consent in the emulator. HOME role granted through Android consent and retained after pressing Home. X11 runtime checks ongoing.
 - Physical Android checks: pending in DEVICE_TESTS.md.
 

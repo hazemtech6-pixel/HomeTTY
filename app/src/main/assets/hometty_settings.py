@@ -21,6 +21,7 @@ FIELDS = {
     "security.lock_apps": (False, bool), "security.lock_terminal": (False, bool),
     "security.lock_settings": (False, bool), "security.lock_desktop": (False, bool),
     "security.lock_privileged": (False, bool), "privilege.rish": (False, bool),
+    "ai.backend": ("external", str), "ai.endpoint": ("", str), "ai.model": ("", str), "ai.external_command": ("", str),
     "desktop.environment": ("xfce", str), "desktop.backend": ("x11", str),
 }
 DESKTOPS = {"xfce", "lxqt", "openbox", "mate", "gnome", "cinnamon", "plasma",
@@ -66,6 +67,8 @@ def validate(source):
     for key, maximum in (("weather.latitude", 90), ("weather.longitude", 180)):
         if abs(value_at(document, key, 0)) > maximum:
             raise ValueError(f"{key} is outside its valid range")
+    if value_at(document, "ai.backend", "external") not in {"external", "ollama"}:
+        raise ValueError("AI backend must be external or ollama")
     if value_at(document, "desktop.environment", "xfce") not in DESKTOPS:
         raise ValueError("Unsupported desktop environment")
     if value_at(document, "desktop.backend", "x11") not in {"x11", "vnc"}:

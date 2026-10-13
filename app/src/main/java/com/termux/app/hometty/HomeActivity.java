@@ -27,6 +27,12 @@ public final class HomeActivity extends Activity {
     private final java.util.concurrent.ExecutorService indexWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
     private List<SearchIndex.Entry> localIndex = Collections.emptyList();
     private long indexedAt;
+    private final List<OllamaClient.Message> aiHistory=new ArrayList<>();
+    private String aiDraft="";
+    private OllamaClient aiClient;
+    private java.util.concurrent.ExecutorService aiWorker;
+    private boolean aiRunning;
+    private int aiGeneration;
     private boolean indexing;
     private LinearLayout root, content, tabs;
     private String selected = "Home";
@@ -69,6 +75,7 @@ public final class HomeActivity extends Activity {
                 String current = HomeConfig.read();
                 if (!current.equals(loadedConfiguration)) {
                     config = new HomeConfig(); loadedConfiguration = current;
+                    if (!config.flag("ai.enabled",false)) { cancelAi(); aiHistory.clear(); aiDraft=""; }
                     if ("AI".equals(selected) && !config.flag("ai.enabled", false)) selected = "Home";
                     boolean editing = "Settings".equals(selected) && configurationEditor != null && !configurationEditor.getText().toString().equals(configurationBaseline);
                     if (editing) {
@@ -80,11 +87,12 @@ public final class HomeActivity extends Activity {
                 }
             } catch (Exception error) { config = null; configurationError(error); }
         }
+        if (config!=null && "AI".equals(selected)) show("AI");
         if (config!=null && "Settings".equals(selected)) ActivityLock.resume(this,"security.lock_settings");
     }
     @Override protected void onStart() { super.onStart(); if (widgets != null) widgets.startListening(); }
-    @Override protected void onStop() { ActivityLock.stop(this); if (widgets != null) widgets.stopListening(); super.onStop(); }
-    @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); indexWorker.shutdownNow(); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
+    @Override protected void onStop() { ActivityLock.stop(this); cancelAi(); if (widgets != null) widgets.stopListening(); super.onStop(); }
+    @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); indexWorker.shutdownNow(); if (aiWorker!=null) aiWorker.shutdownNow(); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
     @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if (config != null) show("Home"); }
     @Override public void onBackPressed() { if (config != null) show("Home"); }
@@ -105,6 +113,7 @@ public final class HomeActivity extends Activity {
     private TextView text(String value, int size) { TextView view = new TextView(this); view.setText(value); view.setTextColor(Color.WHITE); view.setTextSize(size); view.setPadding(8,12,8,12); content.addView(view); return view; }
     private Button action(String label, Runnable runnable) { Button view = new Button(this); view.setText(label); content.addView(view); view.setOnClickListener(v -> runnable.run()); return view; }
     private void show(String name) {
+        if (!"AI".equals(name) || "AI".equals(selected)) cancelAi();
         selected = name; configurationEditor = null; configurationBaseline = null; content.removeAllViews();
         switch (name) {
             case "Home": home(); break;
@@ -476,7 +485,64 @@ public final class HomeActivity extends Activity {
         action("Open desktop files", () -> files(HomeConfig.HOME));
         action("Setup / resume", () -> open(new Intent(this,com.termux.app.SetupActivity.class)));
     }
-    private void ai() { text("AI",26); text("External terminal agents run with the permissions of your shell.",16); action("Open terminal", () -> terminal(false)); }
+    private void cancelAi() {
+        aiGeneration++; aiRunning=false; if (aiClient!=null) { aiClient.cancel(); aiClient=null; }
+    }
+    private void ai() {
+        if (!config.flag("ai.enabled",false)) return;
+        text("AI",26);
+        String command=config.string("ai.external_command", "");
+        if (!command.isEmpty()) action("Start external terminal agent", () -> authenticate("security.lock_terminal", () -> confirm("Run your configured terminal agent?\n"+command, () -> ShellCommands.run(this,command))));
+        action("Open terminal", () -> terminal(false));
+        if (!"ollama".equals(config.string("ai.backend","external"))) { text("Set ai.external_command to an installed agent, or select ai.backend = \"ollama\" for the built-in client.",14); return; }
+        final AiEndpoint endpoint;
+        try { endpoint=new AiEndpoint(config.string("ai.endpoint",""),com.termux.BuildConfig.DEBUG); }
+        catch (Exception error) { text("Configure ai.endpoint and ai.model in TOML. "+error.getMessage(),14); return; }
+        String model=config.string("ai.model", "");
+        text("Ollama · "+endpoint.base+" · "+model,14);
+        text("Messages go to this server. Responses do not run commands. Conversation history stays in memory.",14);
+        TextView transcript=text(aiTranscript(),16); transcript.setTextIsSelectable(true);
+        EditText input=new EditText(this); input.setHint("Message"); input.setTextColor(Color.WHITE); input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(16384)}); input.setText(aiDraft); content.addView(input);
+        input.addTextChangedListener(new TextWatcher() { public void beforeTextChanged(CharSequence s,int a,int c,int n) {} public void onTextChanged(CharSequence s,int a,int b,int c) { aiDraft=s.toString(); } public void afterTextChanged(Editable e) {} });
+        TextView status=text("",14);
+        action("Send", () -> {
+            if (aiRunning || !config.flag("ai.enabled",false)) return;
+            String prompt=input.getText().toString().trim(); if (prompt.isEmpty()) return;
+            List<OllamaClient.Message> history=new ArrayList<>(aiHistory); OllamaClient.Message message=new OllamaClient.Message("user",prompt); history.add(message);
+            aiRunning=true; int generation=++aiGeneration; OllamaClient client=new OllamaClient(); aiClient=client;
+            status.setText("Waiting for server…"); input.setEnabled(false);
+            if (aiWorker==null) aiWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
+            aiWorker.execute(() -> {
+                String answer=null,failure=null;
+                try { answer=client.chat(endpoint,model,history,AiSecrets.get(endpoint)); } catch (Exception error) { failure=error.getMessage(); }
+                final String response=answer,error=failure;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || generation!=aiGeneration || !input.isAttachedToWindow() || !config.flag("ai.enabled",false)) return;
+                    aiRunning=false; aiClient=null; input.setEnabled(true);
+                    if (error!=null) status.setText("Request failed: "+error);
+                    else { aiHistory.add(message); aiHistory.add(new OllamaClient.Message("assistant",response)); while (aiHistory.size()>30) { aiHistory.remove(0); aiHistory.remove(0); } transcript.setText(aiTranscript()); input.setText(""); status.setText("Reply received"); }
+                });
+            });
+        });
+        action("Cancel request", () -> { cancelAi(); input.setEnabled(true); status.setText("Request canceled"); });
+        action("New conversation", () -> { cancelAi(); aiHistory.clear(); aiDraft=""; show("AI"); });
+        action(AiSecrets.configured()?"Replace server credential":"Server credential (optional)", () -> authenticate("security.lock_settings", () -> aiCredential(endpoint)));
+        if (AiSecrets.configured()) action("Remove server credential", () -> authenticate("security.lock_settings", () -> confirm("Remove the saved AI server credential?", () -> { AiSecrets.remove(); show("AI"); })));
+    }
+    private String aiTranscript() {
+        StringBuilder output=new StringBuilder(); for (OllamaClient.Message message:aiHistory) output.append("user".equals(message.role)?"You: ":"Assistant: ").append(message.content).append("\n\n"); return output.toString();
+    }
+    private void aiCredential(AiEndpoint endpoint) {
+        if (!config.flag("ai.enabled",false)) return;
+        if (!endpoint.encrypted()) { toast("Credentials require an HTTPS server"); return; }
+        EditText secret=new EditText(this); secret.setSingleLine(true); secret.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD); secret.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4096)});
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Credential for "+endpoint.base).setView(secret).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create(); dialog.show(); dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String credential=secret.getText().toString(); secret.getText().clear();
+            try { HomeConfig latest=new HomeConfig(); if (!latest.flag("ai.enabled",false) || !new AiEndpoint(latest.string("ai.endpoint",""),com.termux.BuildConfig.DEBUG).base.equals(endpoint.base)) throw new IOException("AI settings changed; review the server again"); AiSecrets.put(endpoint,credential); dialog.dismiss(); toast("Server credential saved in Android Keystore"); }
+            catch (Exception error) { secret.setError(error.getMessage()); }
+        });
+    }
     private void terminal(boolean systemShell) { open(new Intent(this,TermuxActivity.class).putExtra(TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY.EXTRA_FAILSAFE_SESSION,systemShell)); }
     private void authenticate(String flag, Runnable next) {
         if (!config.flag(flag,false)) { next.run(); return; }

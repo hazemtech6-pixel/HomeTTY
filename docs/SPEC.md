@@ -72,3 +72,7 @@ and provide an exact implementation/status matrix and reproducible build command
   and capability grants bind to a manifest digest so changes require review.
 - Debug builds use the local SDK debug key. Production and companions require a
   shared private signing identity, kept outside Git.
+
+- The initial optional built-in AI adapter uses Ollama. User-selected server/model
+  live in TOML; optional credentials are endpoint-bound Keystore records. There is
+  no default network activity or automatic execution of generated responses.

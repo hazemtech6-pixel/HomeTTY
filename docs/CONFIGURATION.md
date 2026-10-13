@@ -86,3 +86,24 @@ implementation for Android 7. Verification runs off the UI thread. Failed attemp
 have a persistent increasing delay after five failures. Passwords and hash records
 are excluded from configuration backup and never written to TOML. Full UI/lifecycle
 verification remains on the Android checklist.
+
+The optional built-in frontend uses the [Ollama chat API](https://docs.ollama.com/api/chat).
+No model or server is selected automatically. Enable it explicitly:
+
+```toml
+[ai]
+enabled = true
+backend = "ollama"
+endpoint = "https://your-server.example/ollama"
+model = "your-installed-model"
+# Alternatively backend = "external" with an installed ai.external_command.
+```
+
+The endpoint is a server base URL; HomeTTY appends `api/chat`. HTTPS is required
+for remote servers and for all credentials. Plain HTTP is allowed only for localhost
+or 127.0.0.1; debug APKs also permit the Android emulator's host alias. Redirects are
+not followed. Credentials are encrypted, bound to the endpoint, and entered only
+inside enabled AI. Conversations stay in memory; leaving the foreground cancels
+pending work. Responses are displayed as text and cannot run tools or commands.
+The Android fixture-server test verifies protocol behavior and zero connections
+while disabled; it does not verify a real model/server.
