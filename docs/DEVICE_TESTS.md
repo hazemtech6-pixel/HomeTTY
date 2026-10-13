@@ -17,6 +17,7 @@ Physical-device checks remain required even after emulator smoke tests.
   remove widget provider. No automatic widget bind without OS consent.
 - [ ] Clock/battery/network display, weather explicit coordinates, offline/error
   handling, permission denial and weather provider attribution.
+- [ ] Files create/rename/delete/open/share, saved SAF tree browser, revoked grants, provider operation flags and folder deletion confirmation.
 - [ ] Files preview, symlink containment, large-file limit, SAF tree grant/denial,
   removable storage, config export/import/cancel and invalid backup rejection.
 - [ ] AI disabled: no tab, key prompt, outbound request or background service.
@@ -78,6 +79,16 @@ continuation (including uncommitted companion integration at test time):
   the role remained assigned in Android role-manager state.
 - HomeTTY:X11 debug APK installed using adb and its activity opened without a
   crash. No desktop frame/CLI connection has been verified.
+
+- Keystore instrumentation: password record encrypt/decrypt/verify and tampered
+  ciphertext rejection passed. Password enrollment UI and full lock lifecycle are
+  not established by this test.
+- SAF instrumentation: create folder/file, write, rename, read, child containment,
+  and traversal rejection passed against HomeTTY's documents provider.
+- Asynchronous search instrumentation: a local desktop entry appeared in the
+  native search results after background indexing. The entry was not executed.
+- The real PTY prompt/state test also verifies preserved raw prompt and answer
+  output in the session-owned setup log.
 
 The other checklist entries remain pending unless separately recorded. These
 results do not establish behavior on physical devices or with rebuilt packages.

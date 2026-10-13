@@ -12,6 +12,7 @@ import android.provider.DocumentsProvider;
 import android.webkit.MimeTypeMap;
 
 import com.termux.R;
+import com.termux.app.hometty.HomeFiles;
 import com.termux.shared.termux.TermuxConstants;
 
 import java.io.File;
@@ -90,8 +91,9 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
     public Cursor queryChildDocuments(String parentDocumentId, String[] projection, String sortOrder) throws FileNotFoundException {
         final MatrixCursor result = new MatrixCursor(projection != null ? projection : DEFAULT_DOCUMENT_PROJECTION);
         final File parent = getFileForDocId(parentDocumentId);
-        for (File file : parent.listFiles()) {
-            includeFile(result, null, file);
+        File[] children=parent.listFiles();
+        if (children!=null) for (File file : children) {
+            try { includeFile(result, null, file); } catch (FileNotFoundException outsideOrGone) { /* Never expose a symlink outside Home. */ }
         }
         return result;
     }
@@ -117,10 +119,12 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
 
     @Override
     public String createDocument(String parentDocumentId, String mimeType, String displayName) throws FileNotFoundException {
-        File newFile = new File(parentDocumentId, displayName);
+        File parent=getFileForDocId(parentDocumentId);
+        try { displayName=HomeFiles.validName(displayName); } catch (IOException error) { throw new FileNotFoundException(error.getMessage()); }
+        File newFile = new File(parent, displayName);
         int noConflictId = 2;
         while (newFile.exists()) {
-            newFile = new File(parentDocumentId, displayName + " (" + noConflictId++ + ")");
+            newFile = new File(parent, displayName + " (" + noConflictId++ + ")");
         }
         try {
             boolean succeeded;
@@ -141,9 +145,16 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
     @Override
     public void deleteDocument(String documentId) throws FileNotFoundException {
         File file = getFileForDocId(documentId);
-        if (!file.delete()) {
+        if (file.equals(BASE_DIR) || !file.delete()) {
             throw new FileNotFoundException("Failed to delete document with id " + documentId);
         }
+    }
+
+    @Override
+    public String renameDocument(String documentId,String displayName) throws FileNotFoundException {
+        File original=getFileForDocId(documentId);
+        try { String name=HomeFiles.validName(displayName); HomeFiles.rename(BASE_DIR,original,name); return new File(original.getParentFile(),name).getAbsolutePath(); }
+        catch (IOException error) { throw new FileNotFoundException(error.getMessage()); }
     }
 
     @Override
@@ -165,22 +176,25 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
         pending.add(parent);
 
         final int MAX_SEARCH_RESULTS = 50;
-        while (!pending.isEmpty() && result.getCount() < MAX_SEARCH_RESULTS) {
+        java.util.Set<String> visited=new java.util.HashSet<>();
+        while (!pending.isEmpty() && result.getCount() < MAX_SEARCH_RESULTS && visited.size()<5000) {
             final File file = pending.removeFirst();
+            try { HomeFiles.contained(BASE_DIR,file); } catch (IOException unsafeOrGone) { continue; }
+            if (!visited.add(file.getAbsolutePath())) continue;
             // Avoid directories outside the $HOME directory linked with symlinks (to avoid e.g. search
             // through the whole SD card).
             boolean isInsideHome;
             try {
-                isInsideHome = file.getCanonicalPath().startsWith(TermuxConstants.TERMUX_HOME_DIR_PATH);
+                isInsideHome = file.getCanonicalPath().equals(BASE_DIR.getCanonicalPath()) || file.getCanonicalPath().startsWith(BASE_DIR.getCanonicalPath()+File.separator);
             } catch (IOException e) {
-                isInsideHome = true;
+                isInsideHome = false;
             }
             if (isInsideHome) {
                 if (file.isDirectory()) {
-                    Collections.addAll(pending, file.listFiles());
+                    File[] children=file.listFiles(); if (children!=null) Collections.addAll(pending,children);
                 } else {
                     if (file.getName().toLowerCase().contains(query)) {
-                        includeFile(result, null, file);
+                        try { includeFile(result, null, file); } catch (FileNotFoundException outsideOrGone) { /* Ignore unsafe or removed entries. */ }
                     }
                 }
             }
@@ -191,7 +205,8 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
 
     @Override
     public boolean isChildDocument(String parentDocumentId, String documentId) {
-        return documentId.startsWith(parentDocumentId);
+        try { String parent=getFileForDocId(parentDocumentId).getCanonicalPath(), child=getFileForDocId(documentId).getCanonicalPath(); return child.startsWith(parent+File.separator); }
+        catch (IOException error) { return false; }
     }
 
     /**
@@ -208,7 +223,8 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
      * Get the file given a document id (the reverse of {@link #getDocIdForFile(File)}).
      */
     private static File getFileForDocId(String docId) throws FileNotFoundException {
-        final File f = new File(docId);
+        final File f;
+        try { f=HomeFiles.contained(BASE_DIR,new File(docId)); } catch (IOException error) { throw new FileNotFoundException(error.getMessage()); }
         if (!f.exists()) throw new FileNotFoundException(f.getAbsolutePath() + " not found");
         return f;
     }
@@ -237,11 +253,8 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
      */
     private void includeFile(MatrixCursor result, String docId, File file)
         throws FileNotFoundException {
-        if (docId == null) {
-            docId = getDocIdForFile(file);
-        } else {
-            file = getFileForDocId(docId);
-        }
+        if (docId == null) docId=getDocIdForFile(file);
+        file=getFileForDocId(docId);
 
         int flags = 0;
         if (file.isDirectory()) {
@@ -249,7 +262,7 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
         } else if (file.canWrite()) {
             flags |= Document.FLAG_SUPPORTS_WRITE;
         }
-        if (file.getParentFile().canWrite()) flags |= Document.FLAG_SUPPORTS_DELETE;
+        if (!file.equals(BASE_DIR) && file.getParentFile().canWrite()) flags |= Document.FLAG_SUPPORTS_DELETE | Document.FLAG_SUPPORTS_RENAME;
 
         final String displayName = file.getName();
         final String mimeType = getMimeType(file);

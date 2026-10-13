@@ -54,5 +54,25 @@ project build directories and does not change host permissions or kernel setting
 runs first for emulator verification. Containers and caches remain for diagnosis.
 The overlay changes the application/API identities while retaining Java namespaces,
 disables stock apt sources and stock mirror selection, and includes Python/API
-helpers. This workflow is under verification; no custom archive is available yet.
+helpers. The verified builder is compiling custom packages; no complete custom archive is
+available yet. The container requires /dev/fuse and SYS_ADMIN for the upstream
+FUSE toolchain overlay; it has no host PID namespace, Docker socket or personal
+files mounted. Its original builder UID/group are preserved for copy-up ownership.
 A signed custom repository and desktop packages still need implementation.
+
+The package overlay adds `X-HomeTTY-Application-ID` to Debian control metadata and
+installs only the local HomeTTY repository public key in the rebuilt keyring.
+`scripts/prepare_repository_key.sh` creates a **development-only** signing key in
+ignored local build storage. Production signing requires a separately managed key.
+No key is committed, and no repository is hosted or published by these scripts.
+
+After packages are built, generate a local signed repository:
+
+```sh
+python3 scripts/build_repository.py .toolchain/termux-packages/output .toolchain/repository --signing-home .toolchain/repository-signing
+```
+
+The generator checks exact build identity, payload paths and executable prefixes;
+creates hashed package indexes, Release/InRelease signatures, a public keyring and
+repository identity metadata. Unit tests verify signatures and package/index hashes.
+Client-side repository delivery and the complete desktop package set remain pending.

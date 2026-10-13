@@ -8,6 +8,10 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.rule.ServiceTestRule;
 import com.termux.app.hometty.HomeConfig;
 import com.termux.app.hometty.InstallPlan;
+import com.termux.app.hometty.SetupOutput;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.ByteArrayOutputStream;
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession;
 import com.termux.terminal.TerminalSession;
 import java.util.Collections;
@@ -29,6 +33,8 @@ public class PtyInstallerTest {
         serviceRule.startService(serviceIntent);
         IBinder binder = serviceRule.bindService(serviceIntent);
         TermuxService service = ((TermuxService.LocalBinder) binder).service;
+        String logStep="test_prompt_"+java.util.UUID.randomUUID();
+        File rawLog=new File(HomeConfig.DATA,"setup-"+logStep+".raw.log");
         AtomicReference<TerminalSession> reference = new AtomicReference<>();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             TermuxSession created = service.createTermuxSession("/system/bin/sh",
@@ -36,6 +42,7 @@ public class PtyInstallerTest {
                 null, HomeConfig.HOME.getAbsolutePath(), true, "HomeTTY instrumentation prompt");
             assertNotNull(created);
             TerminalSession session = created.getTerminalSession();
+            SetupOutput.attach(session,logStep);
             session.updateSize(80, 24, 8, 16);
             reference.set(session);
         });
@@ -55,10 +62,15 @@ public class PtyInstallerTest {
             while (android.os.SystemClock.elapsedRealtime() < deadline && session.isRunning()) Thread.sleep(50);
             assertFalse("Shell did not complete after input", session.isRunning());
             assertEquals(0, session.getExitStatus());
+            try (FileInputStream input=new FileInputStream(rawLog); ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+                byte[] buffer=new byte[4096]; int count; while ((count=input.read(buffer))!=-1) bytes.write(buffer,0,count);
+                String raw=bytes.toString("UTF-8"); assertTrue(raw.contains("Ready?")); assertTrue(raw.contains("answer=yes"));
+            }
             assertTrue(transcript(session).contains("answer=yes"));
             restored.current().exited(session.getExitStatus());
             assertEquals(100, restored.overall());
         } finally {
+            rawLog.delete();
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> service.removeTermuxSession(session));
         }
     }

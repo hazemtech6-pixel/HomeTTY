@@ -1,0 +1,17 @@
+#!@TERMUX_PREFIX@/bin/bash
+# HomeTTY package wrapper. GPL-3.0-only; never selects a stock Termux mirror.
+set -euo pipefail
+if [[ "$(id -u)" == 0 ]]; then echo 'Cannot run pkg as root' >&2; exit 1; fi
+operation="${1:-help}"
+if (($#)); then shift; fi
+case "$operation" in
+    install|reinstall|remove|purge|update|upgrade|full-upgrade|autoremove|autoclean|clean)
+        if [[ "$operation" == reinstall ]]; then exec @TERMUX_PREFIX@/bin/apt install --reinstall "$@"; fi
+        exec @TERMUX_PREFIX@/bin/apt "$operation" "$@" ;;
+    uninstall) exec @TERMUX_PREFIX@/bin/apt remove "$@" ;;
+    search|show) exec @TERMUX_PREFIX@/bin/apt "$operation" "$@" ;;
+    list-all) exec @TERMUX_PREFIX@/bin/apt list "$@" ;;
+    list-installed) exec @TERMUX_PREFIX@/bin/apt list --installed "$@" ;;
+    files) exec @TERMUX_PREFIX@/bin/dpkg -L "$@" ;;
+    *) printf '%s\n' 'HomeTTY pkg: install, reinstall, uninstall, update, upgrade, search, show, list-all, list-installed, files, clean.' 'Only signed repositories rebuilt for HomeTTY may be configured in $PREFIX/etc/apt.'; exit 1 ;;
+esac

@@ -59,11 +59,17 @@ import static com.termux.shared.termux.TermuxConstants.TERMUX_STAGING_PREFIX_DIR
  */
 final class TermuxInstaller {
 
+    private static final java.util.concurrent.atomic.AtomicBoolean bootstrapInstalling=new java.util.concurrent.atomic.AtomicBoolean();
+    static boolean isBootstrapInstalling() { return bootstrapInstalling.get(); }
     private static final String LOG_TAG = "TermuxInstaller";
 
     /** Performs bootstrap setup if necessary. */
     static void setupBootstrapIfNeeded(final Activity activity, final Runnable whenDone) {
-        if (!com.termux.BuildConfig.HOMETTY_HAS_BOOTSTRAP) {
+        boolean shellInstalled=new File(TERMUX_PREFIX_DIR_PATH,"bin/bash").canExecute();
+        if (!shellInstalled && !(activity instanceof SetupActivity)) {
+            activity.startActivity(new android.content.Intent(activity,SetupActivity.class)); activity.finish(); return;
+        }
+        if (!shellInstalled && !com.termux.BuildConfig.HOMETTY_HAS_BOOTSTRAP) {
             new AlertDialog.Builder(activity).setTitle("HomeTTY bootstrap unavailable")
                 .setMessage("This development APK has no packages rebuilt for HomeTTY. Stock Termux packages are incompatible. The Android system shell is available from HomeTTY Tools.")
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> activity.finish()).show();
@@ -113,14 +119,23 @@ final class TermuxInstaller {
             if (TermuxFileUtils.isTermuxPrefixDirectoryEmpty()) {
                 Logger.logInfo(LOG_TAG, "The termux prefix directory \"" + TERMUX_PREFIX_DIR_PATH + "\" exists but is empty or only contains specific unimportant files.");
             } else {
-                whenDone.run();
+                if (shellInstalled) whenDone.run();
+                else new AlertDialog.Builder(activity).setTitle("Incomplete HomeTTY package environment").setMessage("The existing package directory has been preserved. Repair it from the system shell or restore a known-good backup before retrying setup.").setPositiveButton(android.R.string.ok,null).show();
                 return;
             }
         } else if (FileUtils.fileExists(TERMUX_PREFIX_DIR_PATH, false)) {
             Logger.logInfo(LOG_TAG, "The termux prefix directory \"" + TERMUX_PREFIX_DIR_PATH + "\" does not exist but another file exists at its destination.");
         }
 
-        final ProgressDialog progress = ProgressDialog.show(activity, null, activity.getString(R.string.bootstrap_installer_body), true, false);
+        if (FileUtils.fileExists(TERMUX_PREFIX_DIR_PATH,false) && !FileUtils.directoryFileExists(TERMUX_PREFIX_DIR_PATH,true)) {
+            new AlertDialog.Builder(activity).setMessage("A file occupies the package directory path. It has been preserved; move it before retrying.").setPositiveButton(android.R.string.ok,null).show(); return;
+        }
+        if (!bootstrapInstalling.compareAndSet(false,true)) {
+            new AlertDialog.Builder(activity).setMessage("Bootstrap extraction is already running. Wait for it to finish before retrying.").setPositiveButton(android.R.string.ok,null).show(); return;
+        }
+        final ProgressDialog progress;
+        try { progress=ProgressDialog.show(activity, null, activity.getString(R.string.bootstrap_installer_body), true, false); }
+        catch (RuntimeException error) { bootstrapInstalling.set(false); throw error; }
         new Thread() {
             @Override
             public void run() {
@@ -233,6 +248,7 @@ final class TermuxInstaller {
                     showBootstrapErrorDialog(activity, whenDone, Logger.getStackTracesMarkdownString(null, Logger.getStackTracesStringArray(e)));
 
                 } finally {
+                    bootstrapInstalling.set(false);
                     activity.runOnUiThread(() -> {
                         try {
                             progress.dismiss();
@@ -260,7 +276,6 @@ final class TermuxInstaller {
                     })
                     .setPositiveButton(R.string.bootstrap_error_try_again, (dialog, which) -> {
                         dialog.dismiss();
-                        FileUtils.deleteFile("termux prefix directory", TERMUX_PREFIX_DIR_PATH, true);
                         TermuxInstaller.setupBootstrapIfNeeded(activity, whenDone);
                     }).show();
             } catch (WindowManager.BadTokenException e1) {

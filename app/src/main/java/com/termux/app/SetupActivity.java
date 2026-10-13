@@ -28,6 +28,7 @@ public final class SetupActivity extends Activity implements ServiceConnection {
     private ProgressBar progress;
     private Button next, interact, skip, cancel;
     private boolean bound;
+    private String outputError = "";
     private String lastTranscript = "", lastTranscriptStep = "";
     private final Runnable tick = new Runnable() { @Override public void run() { poll(); handler.postDelayed(this,500); } };
     @Override public void onCreate(Bundle saved) {
@@ -84,6 +85,7 @@ public final class SetupActivity extends Activity implements ServiceConnection {
         }
         TermuxSession session=service.createTermuxSession("/system/bin/sh",new String[]{"-c",step.command},null,HomeConfig.HOME.getAbsolutePath(),true,"HomeTTY setup: " + step.id);
         if (session==null) { Toast.makeText(this,"Could not create PTY",Toast.LENGTH_LONG).show(); return; }
+        com.termux.app.hometty.SetupOutput.attach(session.getTerminalSession(),step.id);
         step.start(session.getTerminalSession().mHandle); persist(); terminal.attachSession(session.getTerminalSession()); refresh();
     }
     private void installCompanion(InstallPlan.Step step) {
@@ -105,6 +107,9 @@ public final class SetupActivity extends Activity implements ServiceConnection {
             TerminalSession session=find(step.handle());
             if (session==null) { step.lost(); persist(); }
             else {
+                com.termux.app.hometty.SetupOutput output=com.termux.app.hometty.SetupOutput.attach(session,step.id);
+                outputError=output.error()==null?"":"\nCannot save raw output: "+output.error();
+                if (output.progress()>step.progress()) { step.progress(output.progress()); persist(); }
                 terminal.attachSession(session);
                 if (session.getEmulator()!=null) {
                     String transcript=session.getEmulator().getScreen().getTranscriptText();
@@ -123,7 +128,7 @@ public final class SetupActivity extends Activity implements ServiceConnection {
     private void refresh() {
         if (plan==null || label==null) return;
         InstallPlan.Step step=plan.current(); progress.setProgress(plan.overall());
-        String status="Setup " + plan.overall()+"%\n"+(step==null ? "Verification complete" : step.title+" · "+step.status()+"\n"+step.message());
+        String status="Setup " + plan.overall()+"%\n"+(step==null ? "Verification complete" : step.title+" · "+step.status()+"\n"+step.message())+outputError;
         if (!status.contentEquals(label.getText())) label.setText(status);
         next.setEnabled(step!=null && service!=null);
         String nextTitle=step!=null && step.live() ? (step.command.startsWith("companion:") ? "Install" : "Done input") : step!=null && (step.status()==InstallPlan.Status.FAILED || step.status()==InstallPlan.Status.CANCELLED) ? "Retry" : "Continue";

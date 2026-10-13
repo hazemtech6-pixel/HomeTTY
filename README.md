@@ -13,12 +13,16 @@ HomeTTY's longer application prefix. See [status](docs/STATUS.md), the
 ## Build and verify
 
 Install JDK 17 or 21, Android SDK platform 36, build-tools 35.0.0, and NDK
-29.0.14206865. Set `JAVA_HOME` and `ANDROID_HOME` to your local installations:
+29.0.14206865, CMake 3.22.1, Ninja, bison and flex. Set `JAVA_HOME` and `ANDROID_HOME` to your local installations:
 
 ```sh
-./gradlew :app:assembleDebug :app:testDebugUnitTest :terminal-emulator:testDebugUnitTest :app:lintDebug
-python3 scripts/test_bootstrap.py
+scripts/build_debug.sh
+python3 scripts/test_repository.py
 ```
+
+The combined script initializes pinned X11 native submodules and bundles all four
+HomeTTY companion APKs. Package/bootstrap build instructions are in
+[BOOTSTRAP.md](docs/BOOTSTRAP.md).
 
 APKs are written under `app/build/outputs/apk/debug/`. Debug signing uses the
 local SDK debug key, never the public upstream test key. The Gradle wrapper is

@@ -77,3 +77,12 @@ comments and unknown fields, and refuses concurrent overwrites. Arrow keys/j/k s
 Enter edits, s saves with confirmation, e opens the full editor, r reloads and q quits.
 Native Settings reloads validated external changes when resumed. Android TUI runtime
 verification remains pending the custom-prefix Python build.
+
+Optional HomeTTY password/PIN enrollment and removal require Android device
+credentials. Once enrolled, enabled HomeTTY locks use the encrypted password
+record; removing it restores Android authentication. Hashing uses a fresh salt
+and PBKDF2-HMAC-SHA256 with 600,000 iterations, including an equivalent HMAC
+implementation for Android 7. Verification runs off the UI thread. Failed attempts
+have a persistent increasing delay after five failures. Passwords and hash records
+are excluded from configuration backup and never written to TOML. Full UI/lifecycle
+verification remains on the Android checklist.

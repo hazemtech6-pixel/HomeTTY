@@ -29,6 +29,15 @@ import java.util.UUID;
  * NOTE: The terminal session may outlive the EmulatorView, so be careful with callbacks!
  */
 public final class TerminalSession extends TerminalOutput {
+    /** Raw PTY observers run on the input-reader thread; never modify its buffer. */
+    public interface OutputListener {
+        void onOutput(byte[] data, int count);
+        default void onOutputClosed() {}
+    }
+    private final java.util.concurrent.CopyOnWriteArrayList<OutputListener> outputListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    public void addOutputListener(OutputListener listener) { outputListeners.addIfAbsent(listener); }
+    public void removeOutputListener(OutputListener listener) { outputListeners.remove(listener); }
+
 
     private static final int MSG_NEW_INPUT = 1;
     private static final int MSG_PROCESS_EXITED = 4;
@@ -138,11 +147,18 @@ public final class TerminalSession extends TerminalOutput {
                     while (true) {
                         int read = termIn.read(buffer);
                         if (read == -1) return;
+                        for (OutputListener listener : outputListeners) {
+                            try { listener.onOutput(buffer, read); } catch (RuntimeException brokenObserver) { outputListeners.remove(listener); Logger.logWarn(mClient, LOG_TAG, "PTY output observer failed: " + brokenObserver.getClass().getSimpleName()); }
+                        }
                         if (!mProcessToTerminalIOQueue.write(buffer, 0, read)) return;
                         mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
                     }
                 } catch (Exception e) {
                     // Ignore, just shutting down.
+                } finally {
+                    for (OutputListener listener : outputListeners) {
+                        try { listener.onOutputClosed(); } catch (RuntimeException ignored) { /* Observer failure must not stop PTY cleanup. */ }
+                    }
                 }
             }
         }.start();

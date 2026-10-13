@@ -25,6 +25,8 @@ public final class SecretStore {
         if (!name.matches("[a-z0-9_-]{1,64}")) throw new IllegalArgumentException("Invalid secret name");
         return new AtomicFile(new File(HomeConfig.DATA, name + ".sealed"));
     }
+    public static boolean contains(String name) { AtomicFile value = file(name); return value.getBaseFile().exists() || new File(value.getBaseFile().getPath() + ".bak").exists(); }
+    public static synchronized void delete(String name) { file(name).delete(); }
     public static synchronized void put(String name, byte[] secret) throws Exception {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key());
         AtomicFile file = file(name); FileOutputStream raw = null;

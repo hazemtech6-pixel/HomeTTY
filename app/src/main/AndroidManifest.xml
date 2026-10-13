@@ -57,6 +57,9 @@
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
+        <provider android:name=".app.hometty.HomeFileProvider" android:authorities="${applicationId}.homefiles" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/hometty_home_paths" />
+        </provider>
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.companions" android:exported="false"
             android:grantUriPermissions="true">

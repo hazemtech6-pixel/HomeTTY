@@ -11,3 +11,4 @@ export HOMETTY_X11_APK="$project_dir/companions/x11/lorie-app/build/outputs/apk/
 ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :terminal-emulator:testDebugUnitTest :hometty-tasker:testDebugUnitTest :app:lintDebug --console=plain
 python3 scripts/test_bootstrap.py
 python3 scripts/test_settings_tui.py
+python3 scripts/test_repository.py

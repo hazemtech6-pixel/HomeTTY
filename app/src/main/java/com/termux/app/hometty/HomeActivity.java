@@ -21,7 +21,13 @@ import java.util.*;
 public final class HomeActivity extends Activity {
     private HomeConfig config;
     private String loadedConfiguration;
+    private EditText configurationEditor;
+    private String configurationBaseline;
     private LauncherState state;
+    private final java.util.concurrent.ExecutorService indexWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private List<SearchIndex.Entry> localIndex = Collections.emptyList();
+    private long indexedAt;
+    private boolean indexing;
     private LinearLayout root, content, tabs;
     private String selected = "Home";
     private AppWidgetHost widgets;
@@ -64,7 +70,13 @@ public final class HomeActivity extends Activity {
                 if (!current.equals(loadedConfiguration)) {
                     config = new HomeConfig(); loadedConfiguration = current;
                     if ("AI".equals(selected) && !config.flag("ai.enabled", false)) selected = "Home";
-                    build();
+                    boolean editing = "Settings".equals(selected) && configurationEditor != null && !configurationEditor.getText().toString().equals(configurationBaseline);
+                    if (editing) {
+                        toast("Configuration changed externally; your unsaved edit is preserved. Reopen Settings to reload.");
+                        if (!config.flag("ai.enabled", false)) for (int index = tabs.getChildCount() - 1; index >= 0; index--) {
+                            View view = tabs.getChildAt(index); if (view instanceof Button && "AI".contentEquals(((Button)view).getText())) tabs.removeViewAt(index);
+                        }
+                    } else build();
                 }
             } catch (Exception error) { config = null; configurationError(error); }
         }
@@ -72,7 +84,7 @@ public final class HomeActivity extends Activity {
     }
     @Override protected void onStart() { super.onStart(); if (widgets != null) widgets.startListening(); }
     @Override protected void onStop() { ActivityLock.stop(this); if (widgets != null) widgets.stopListening(); super.onStop(); }
-    @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
+    @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); indexWorker.shutdownNow(); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
     @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if (config != null) show("Home"); }
     @Override public void onBackPressed() { if (config != null) show("Home"); }
@@ -93,7 +105,7 @@ public final class HomeActivity extends Activity {
     private TextView text(String value, int size) { TextView view = new TextView(this); view.setText(value); view.setTextColor(Color.WHITE); view.setTextSize(size); view.setPadding(8,12,8,12); content.addView(view); return view; }
     private Button action(String label, Runnable runnable) { Button view = new Button(this); view.setText(label); content.addView(view); view.setOnClickListener(v -> runnable.run()); return view; }
     private void show(String name) {
-        selected = name; content.removeAllViews();
+        selected = name; configurationEditor = null; configurationBaseline = null; content.removeAllViews();
         switch (name) {
             case "Home": home(); break;
             case "Apps": apps(); break;
@@ -144,15 +156,54 @@ public final class HomeActivity extends Activity {
     private String label(ResolveInfo item) { return state.get("label." + id(item),item.loadLabel(getPackageManager()).toString()); }
     private void apps() { text("Apps",26); search(); }
     private void search() {
-        EditText query = new EditText(this); query.setSingleLine(true); query.setHint("Search apps · app: · shell: · web:"); query.setTextColor(Color.WHITE); content.addView(query);
+        EditText query = new EditText(this); query.setSingleLine(true); query.setHint("Search · app: · shell: · desktop: · file: · web:"); query.setTextColor(Color.WHITE); content.addView(query);
         LinearLayout results = new LinearLayout(this); results.setOrientation(LinearLayout.VERTICAL); content.addView(results);
-        Runnable update = () -> { results.removeAllViews(); String value = query.getText().toString().trim();
-            if (value.startsWith("shell:")) { resultAction(results,"Run in terminal: " + value.substring(6), () -> confirm("Run this shell command?\n" + value.substring(6), () -> authenticate("security.lock_terminal", () -> ShellCommands.run(this, value.substring(6))))); }
-            else if (value.startsWith("web:")) { resultAction(results,"Search the web", () -> open(new Intent(Intent.ACTION_VIEW,Uri.parse("https://www.google.com/search?q=" + Uri.encode(value.substring(4)))))); }
-            else renderApps(value.startsWith("app:") ? value.substring(4).trim() : value,false,results);
-        };
+        Runnable update = () -> searchResults(query.getText().toString().trim(), results);
         query.addTextChangedListener(new TextWatcher() { public void beforeTextChanged(CharSequence s,int start,int count,int after) {} public void onTextChanged(CharSequence s,int start,int before,int count) { update.run(); } public void afterTextChanged(Editable value) {} });
         if ("Apps".equals(selected)) update.run();
+        if (!indexing && System.currentTimeMillis()-indexedAt>60000) {
+            indexing=true;
+            indexWorker.execute(() -> {
+                List<SearchIndex.Entry> entries;
+                try { entries=SearchIndex.build(HomeConfig.HOME,new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH)); } catch (IOException error) { entries=Collections.emptyList(); }
+                final List<SearchIndex.Entry> indexed=entries;
+                runOnUiThread(() -> { indexing=false; if (isFinishing() || isDestroyed()) return; localIndex=indexed; indexedAt=System.currentTimeMillis(); if (query.isAttachedToWindow() && query.length()>0) update.run(); });
+            });
+        }
+    }
+    private void searchResults(String value, LinearLayout results) {
+        results.removeAllViews();
+        if (value.startsWith("shell:")) { resultAction(results,"Run in terminal: " + value.substring(6), () -> confirm("Run this shell command?\n" + value.substring(6), () -> authenticate("security.lock_terminal", () -> ShellCommands.run(this, value.substring(6))))); return; }
+        if (value.startsWith("desktop-web:")) {
+            String url="https://www.google.com/search?q="+Uri.encode(value.substring(12));
+            resultAction(results,"Search using desktop browser", () -> authenticate("security.lock_desktop", () -> ShellCommands.run(this,"export DISPLAY=${DISPLAY:-:1}; exec xdg-open "+DesktopEntry.quote(url)))); return;
+        }
+        if (value.startsWith("web:")) { resultAction(results,"Search the web", () -> open(new Intent(Intent.ACTION_VIEW,Uri.parse("https://www.google.com/search?q="+Uri.encode(value.substring(4)))))); return; }
+        String kind="", term=value; int colon=value.indexOf(':');
+        if (colon>0 && Arrays.asList("app","desktop","file","command").contains(value.substring(0,colon))) { kind=value.substring(0,colon); term=value.substring(colon+1).trim(); }
+        if ("Apps".equals(selected) && kind.isEmpty()) kind="app";
+        final String category=kind, needle=term.toLowerCase(Locale.ROOT);
+        List<SearchIndex.Entry> matches=new ArrayList<>(); Map<String,ResolveInfo> androidApps=new HashMap<>();
+        if (category.isEmpty() || "app".equals(category)) for (ResolveInfo app:activities()) {
+            if (label(app).toLowerCase(Locale.ROOT).contains(needle)) { SearchIndex.Entry entry=new SearchIndex.Entry("app",label(app),id(app),""); matches.add(entry); androidApps.put(entry.target,app); }
+        }
+        if (!value.isEmpty()) for (SearchIndex.Entry entry:localIndex) if ((category.isEmpty() || category.equals(entry.kind)) && entry.title.toLowerCase(Locale.ROOT).contains(needle)) matches.add(entry);
+        matches.sort((a,b) -> { String x="app".equals(a.kind)?a.target:a.id(), y="app".equals(b.kind)?b.target:b.id(); int pins=Boolean.compare(state.pinned(y),state.pinned(x)); if (pins!=0) return pins; int uses=Integer.compare(state.uses(y),state.uses(x)); return uses!=0?uses:a.title.compareToIgnoreCase(b.title); });
+        int count=0;
+        for (SearchIndex.Entry entry:matches) {
+            if (++count>100) break;
+            Button button=new Button(this); button.setText(entry.title+" · "+entry.kind); results.addView(button);
+            ResolveInfo app=androidApps.get(entry.target);
+            if (app!=null) { android.graphics.drawable.Drawable icon=app.loadIcon(getPackageManager()); icon.setBounds(0,0,dp(32),dp(32)); button.setCompoundDrawables(icon,null,null,null); }
+            String key="app".equals(entry.kind)?entry.target:entry.id();
+            button.setOnClickListener(v -> {
+                Runnable used=() -> put("uses."+key,Integer.toString(Math.min(Integer.MAX_VALUE-1,state.uses(key))+1));
+                if ("app".equals(entry.kind)) authenticate("security.lock_apps", () -> { if (open(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName.unflattenFromString(entry.target)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))) used.run(); });
+                else if ("file".equals(entry.kind)) { File file=new File(entry.target); files(file.isDirectory()?file:file.getParentFile()); used.run(); }
+                else authenticate("desktop".equals(entry.kind)?"security.lock_desktop":"security.lock_terminal", () -> confirm("Launch "+entry.title+"?\n"+entry.command, () -> { ShellCommands.run(this,entry.command); used.run(); }));
+            });
+            button.setOnLongClickListener(v -> { if (app!=null) appMenu(app); else confirm(state.pinned(key)?"Unpin "+entry.title+"?":"Pin "+entry.title+"?", () -> { put("pin."+key,Boolean.toString(!state.pinned(key))); searchResults(value,results); }); return true; });
+        }
     }
     private void resultAction(LinearLayout container, String title, Runnable run) { Button b = new Button(this); b.setText(title); container.addView(b); b.setOnClickListener(v -> run.run()); }
     private void renderApps(String query, boolean pinnedOnly, LinearLayout target) {
@@ -194,6 +245,8 @@ public final class HomeActivity extends Activity {
     private void tools() {
         text("Tools",26);
         action("Home files", () -> files(HomeConfig.HOME));
+        String tree=state.get("storage.tree", "");
+        if (!tree.isEmpty()) action("Saved Android storage", () -> storage(Uri.parse(tree), null));
         action("Android / external storage", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),STORAGE));
         action("Calculator", () -> open(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALCULATOR)));
         action("Calendar", () -> open(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)));
@@ -204,7 +257,7 @@ public final class HomeActivity extends Activity {
         action("Plugins and sources", this::plugins);
         action("HomeTTY companions", this::companions);
         action("Privilege providers", this::privilege);
-        if (config.flag("privilege.rish", false)) action("RISH", () -> confirm("Start RISH with the privileges granted by your Shizuku provider?", () -> ShellCommands.run(this,"rish")));
+        if (config.flag("privilege.rish", false)) action("RISH", () -> authenticate("security.lock_privileged", () -> confirm("Start RISH with the privileges granted by your Shizuku provider?", () -> ShellCommands.run(this,"rish"))));
     }
     private void companions() {
         content.removeAllViews(); text("HomeTTY companions",26);
@@ -228,11 +281,15 @@ public final class HomeActivity extends Activity {
 
     }
     private void files(File directory) {
+        try { String path=directory.getCanonicalPath(), home=HomeConfig.HOME.getCanonicalPath(); if (!path.equals(home) && !path.startsWith(home+"/")) { toast("Use the Android storage picker outside Home"); return; } }
+        catch (IOException error) { toast(error.getMessage()); return; }
         content.removeAllViews(); text(directory.equals(HomeConfig.HOME) ? "Home files" : directory.getName(),22);
         if (!directory.equals(HomeConfig.HOME)) action("Parent folder", () -> files(directory.getParentFile()));
+        action("New folder", () -> fileName("Folder name", "", name -> { HomeFiles.create(HomeConfig.HOME,directory,name,true); files(directory); }));
+        action("New file", () -> fileName("File name", "", name -> { HomeFiles.create(HomeConfig.HOME,directory,name,false); files(directory); }));
         File[] entries = directory.listFiles(); if (entries == null) { text("Cannot read this folder",16); return; }
         Arrays.sort(entries,(a,b) -> { int type = Boolean.compare(b.isDirectory(),a.isDirectory()); return type != 0 ? type : a.getName().compareToIgnoreCase(b.getName()); });
-        for (File entry : entries) action((entry.isDirectory() ? "▸ " : "") + entry.getName(), () -> {
+        for (File entry : entries) { Button item=action((entry.isDirectory() ? "▸ " : "") + entry.getName(), () -> {
             try {
                 if (!entry.getCanonicalPath().startsWith(HomeConfig.HOME.getCanonicalPath()+"/")) { toast("Use the Android file picker for files outside Home"); return; }
                 if (entry.isDirectory()) { files(entry); return; }
@@ -243,18 +300,100 @@ public final class HomeActivity extends Activity {
                 }
             } catch (IOException e) { toast(e.getMessage()); }
         });
+            item.setOnLongClickListener(v -> { fileMenu(entry); return true; });
+        }
+    }
+    private interface FileNameAction { void run(String name) throws Exception; }
+    private void fileName(String title,String initial,FileNameAction action) {
+        EditText name=new EditText(this); name.setSingleLine(true); name.setText(initial);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(title).setView(name).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create(); dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> { try { action.run(name.getText().toString()); dialog.dismiss(); } catch (Exception error) { name.setError(error.getMessage()); } });
+    }
+    private void fileMenu(File entry) {
+        new AlertDialog.Builder(this).setTitle(entry.getName()).setItems(entry.isDirectory()?new String[]{"Rename","Delete empty folder"}:new String[]{"Rename","Delete","Open with Android app","Share"},(dialog,choice) -> {
+            if (choice==0) fileName("Rename",entry.getName(),name -> { HomeFiles.rename(HomeConfig.HOME,entry,name); files(entry.getParentFile()); });
+            else if (choice==1) confirm("Delete "+entry.getName()+"? This cannot be undone. Folders must be empty.", () -> { try { HomeFiles.delete(HomeConfig.HOME,entry); files(entry.getParentFile()); } catch (IOException error) { toast(error.getMessage()); } });
+            else {
+                try {
+                    File file=HomeFiles.contained(HomeConfig.HOME,entry);
+                    Uri uri=androidx.core.content.FileProvider.getUriForFile(this,getPackageName()+".homefiles",file);
+                    String extension=android.webkit.MimeTypeMap.getFileExtensionFromUrl(file.getName()).toLowerCase(Locale.ROOT);
+                    String mime=android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension); if (mime==null) mime="application/octet-stream";
+                    Intent intent=choice==2?new Intent(Intent.ACTION_VIEW).setDataAndType(uri,mime):new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM,uri);
+                    intent.setClipData(ClipData.newRawUri("HomeTTY file",uri)); intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    open(Intent.createChooser(intent,choice==2?"Open file":"Share file").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+                } catch (Exception error) { toast(error.getMessage()); }
+            }
+        }).show();
+    }
+    private void storage(Uri tree,Uri document) { storage(tree,document,new ArrayList<>()); }
+    private void storage(Uri tree,Uri document,List<Uri> parents) {
+        Uri current=document==null?android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree)):document;
+        content.removeAllViews(); text("Android storage",22); action("Tools", () -> show("Tools"));
+        if (!parents.isEmpty()) action("Parent folder", () -> { List<Uri> previous=new ArrayList<>(parents); Uri parent=previous.remove(previous.size()-1); storage(tree,parent,previous); });
+        LinearLayout listing=new LinearLayout(this); listing.setOrientation(LinearLayout.VERTICAL); content.addView(listing);
+        TextView loading=new TextView(this); loading.setText("Loading…"); listing.addView(loading);
+        indexWorker.execute(() -> {
+            List<StorageEntry> entries=new ArrayList<>(); int parentFlags=0; String failure=null;
+            try {
+                String[] columns={android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE,android.provider.DocumentsContract.Document.COLUMN_FLAGS};
+                try (android.database.Cursor parent=getContentResolver().query(current,new String[]{android.provider.DocumentsContract.Document.COLUMN_FLAGS},null,null,null)) { if (parent!=null && parent.moveToFirst()) parentFlags=parent.getInt(0); }
+                Uri children=android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree,android.provider.DocumentsContract.getDocumentId(current));
+                try (android.database.Cursor cursor=getContentResolver().query(children,columns,null,null,null)) {
+                    if (cursor==null) throw new IOException("Storage provider returned no listing");
+                    while (cursor.moveToNext() && entries.size()<1000) entries.add(new StorageEntry(android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,cursor.getString(0)),cursor.getString(1),cursor.getString(2),cursor.getInt(3)));
+                }
+                entries.sort((x,y) -> { int type=Boolean.compare(y.directory(),x.directory()); return type!=0?type:x.name.compareToIgnoreCase(y.name); });
+            } catch (Exception error) { failure=error.getMessage(); }
+            final String error=failure; final int flags=parentFlags;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || !listing.isAttachedToWindow()) return;
+                listing.removeAllViews();
+                if (error!=null) { loading.setText("Cannot read storage: "+error+". Choose the folder again if its permission was revoked."); listing.addView(loading); return; }
+                if ((flags & android.provider.DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE)!=0) {
+                    resultAction(listing,"New folder", () -> fileName("Folder name","",name -> { HomeFiles.validName(name); storageChange(() -> { if (android.provider.DocumentsContract.createDocument(getContentResolver(),current,android.provider.DocumentsContract.Document.MIME_TYPE_DIR,HomeFiles.validName(name))==null) throw new IOException("Storage provider rejected creation"); },tree,current,parents,listing); }));
+                    resultAction(listing,"New file", () -> fileName("File name","",name -> { HomeFiles.validName(name); storageChange(() -> { if (android.provider.DocumentsContract.createDocument(getContentResolver(),current,"text/plain",HomeFiles.validName(name))==null) throw new IOException("Storage provider rejected creation"); },tree,current,parents,listing); }));
+                }
+                for (StorageEntry entry:entries) {
+                    Button item=new Button(this); item.setText((entry.directory()?"▸ ":"")+entry.name); listing.addView(item);
+                    item.setOnClickListener(v -> { if (entry.directory()) { List<Uri> next=new ArrayList<>(parents); next.add(current); storage(tree,entry.uri,next); } else open(new Intent(Intent.ACTION_VIEW).setDataAndType(entry.uri,entry.mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)); });
+                    item.setOnLongClickListener(v -> {
+                        List<String> actions=new ArrayList<>(); if ((entry.flags & android.provider.DocumentsContract.Document.FLAG_SUPPORTS_RENAME)!=0) actions.add("Rename"); if ((entry.flags & android.provider.DocumentsContract.Document.FLAG_SUPPORTS_DELETE)!=0) actions.add("Delete"); if (!entry.directory()) actions.add("Share");
+                        if (actions.isEmpty()) return true;
+                        new AlertDialog.Builder(this).setTitle(entry.name).setItems(actions.toArray(new String[0]),(dialog,choice) -> {
+                            String operation=actions.get(choice);
+                            if ("Rename".equals(operation)) fileName("Rename",entry.name,name -> { HomeFiles.validName(name); storageChange(() -> { if (android.provider.DocumentsContract.renameDocument(getContentResolver(),entry.uri,HomeFiles.validName(name))==null) throw new IOException("Storage provider rejected rename"); },tree,current,parents,listing); });
+                            else if ("Delete".equals(operation)) confirm("Delete "+entry.name+(entry.directory()?" and all its contents":"")+"? This cannot be undone.", () -> storageChange(() -> { if (!android.provider.DocumentsContract.deleteDocument(getContentResolver(),entry.uri)) throw new IOException("Storage provider rejected deletion"); },tree,current,parents,listing));
+                            else { Intent intent=new Intent(Intent.ACTION_SEND).setType(entry.mime).putExtra(Intent.EXTRA_STREAM,entry.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION); intent.setClipData(ClipData.newRawUri(entry.name,entry.uri)); open(Intent.createChooser(intent,"Share file").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)); }
+                        }).show(); return true;
+                    });
+                }
+            });
+        });
+    }
+    private interface StorageOperation { void run() throws Exception; }
+    private void storageChange(StorageOperation operation,Uri tree,Uri current,List<Uri> parents,LinearLayout listing) {
+        indexWorker.execute(() -> { String failure=null; try { operation.run(); } catch (Exception error) { failure=error.getMessage(); } final String message=failure; runOnUiThread(() -> { if (isFinishing() || isDestroyed()) return; if (message!=null) toast(message); if (listing.isAttachedToWindow()) storage(tree,current,parents); }); });
+    }
+    private static final class StorageEntry {
+        final Uri uri; final String name,mime; final int flags;
+        StorageEntry(Uri uri,String name,String mime,int flags) { this.uri=uri; this.name=name; this.mime=mime; this.flags=flags; }
+        boolean directory() { return android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime); }
     }
     private void settings() {
         text("Settings",26); text("~/.config/hometty/config.toml",14);
         EditText editor = new EditText(this); editor.setTextColor(Color.WHITE); editor.setTypeface(android.graphics.Typeface.MONOSPACE); editor.setGravity(Gravity.TOP);
         final String baseline;
         try { baseline = HomeConfig.read(); editor.setText(baseline); } catch (IOException e) { toast(e.getMessage()); return; }
+        configurationEditor = editor; configurationBaseline = baseline;
         content.addView(editor);
         action("Validate and save", () -> { try { if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed externally; reopen Settings before saving"); HomeConfig.save(editor.getText().toString()); loadedConfiguration = HomeConfig.read(); config = new HomeConfig(); selected = "Home"; build(); } catch (Exception e) { toast(e.getMessage()); } });
         action("Settings TUI", this::settingsTui);
         action("Edit in terminal", () -> ShellCommands.run(this,"${EDITOR:-vi} \"$HOME/.config/hometty/config.toml\""));
         action("Back up configuration", () -> openForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/toml").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"hometty-config.toml"),BACKUP));
         action("Restore configuration", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),RESTORE));
+        action(HomePassword.configured() ? "Change HomeTTY password / PIN" : "Set HomeTTY password / PIN", () -> deviceAuthentication(() -> HomePassword.prompt(this, true, () -> { toast("HomeTTY password saved; enable the desired lock flags in TOML"); settings(); }, () -> {})));
+        if (HomePassword.configured()) action("Remove HomeTTY password / PIN", () -> deviceAuthentication(() -> confirm("Remove the HomeTTY password? Enabled locks will use Android credentials.", () -> { HomePassword.remove(); settings(); })));
         action("Terminal preferences", () -> open(new Intent(this,com.termux.app.activities.SettingsActivity.class)));
     }
     private void settingsTui() {
@@ -341,6 +480,10 @@ public final class HomeActivity extends Activity {
     private void terminal(boolean systemShell) { open(new Intent(this,TermuxActivity.class).putExtra(TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY.EXTRA_FAILSAFE_SESSION,systemShell)); }
     private void authenticate(String flag, Runnable next) {
         if (!config.flag(flag,false)) { next.run(); return; }
+        if (HomePassword.configured()) { HomePassword.prompt(this, false, next, () -> {}); return; }
+        deviceAuthentication(next);
+    }
+    private void deviceAuthentication(Runnable next) {
         KeyguardManager keyguard = getSystemService(KeyguardManager.class);
         Intent intent = keyguard.createConfirmDeviceCredentialIntent("Unlock HomeTTY", "Confirm your device credential");
         if (intent == null) { toast("Set an Android screen lock before using locked HomeTTY surfaces"); return; }
@@ -372,8 +515,8 @@ public final class HomeActivity extends Activity {
             } catch (Exception e) { toast(e.getMessage()); }
             return;
         }
-        if (request == AUTHENTICATE) { Runnable next = afterAuthentication; afterAuthentication = null; if (result == RESULT_OK && next != null) next.run(); return; }
-        if (request == STORAGE) { if (result == RESULT_OK && data != null && data.getData() != null) { try { int grants=0; if ((data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0) grants |= Intent.FLAG_GRANT_READ_URI_PERMISSION; if ((data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION)!=0) grants |= Intent.FLAG_GRANT_WRITE_URI_PERMISSION; getContentResolver().takePersistableUriPermission(data.getData(),grants); open(new Intent(Intent.ACTION_VIEW,data.getData()).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)); } catch (RuntimeException e) { toast(e.getMessage()); } } return; }
+        if (request == AUTHENTICATE) { Runnable next = afterAuthentication; afterAuthentication = null; if (result == RESULT_OK && next != null) { ActivityLock.authorized(this); next.run(); } return; }
+        if (request == STORAGE) { if (result == RESULT_OK && data != null && data.getData() != null) { try { int grants=0; if ((data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0) grants |= Intent.FLAG_GRANT_READ_URI_PERMISSION; if ((data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION)!=0) grants |= Intent.FLAG_GRANT_WRITE_URI_PERMISSION; getContentResolver().takePersistableUriPermission(data.getData(),grants); put("storage.tree",data.getData().toString()); storage(data.getData(),null); } catch (RuntimeException e) { toast(e.getMessage()); } } return; }
         if (request != PICK_WIDGET && request != CONFIGURE_WIDGET) return;
         if (pendingWidget == -1) return;
         if (result != RESULT_OK) { widgets.deleteAppWidgetId(pendingWidget); pendingWidget = -1; return; }
