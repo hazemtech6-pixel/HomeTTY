@@ -20,6 +20,11 @@ def prepare(root):
     if revision != REVISION:
         raise RuntimeError(f'Expected pinned package revision {REVISION}, got {revision}')
     properties = root / 'scripts/properties.sh'
+    # bzip2 is emitted by libbz2; custom-prefix builds cannot resolve it by
+    # downloading an already-built stock package. Build its source parent.
+    bootstraps = root / 'scripts/build-bootstraps.sh'
+    replace_once(bootstraps, 'local package_name="$2"',
+                 'local package_name="$2"\n\tif [[ "$package_name" == "bzip2" ]]; then package_name="libbz2"; fi')
     # An interrupted configure leaves a directory without a usable interpreter.
     # Resume the pinned source build rather than treating that directory as success.
     host_python = root / 'scripts/build/setup/termux_setup_build_python.sh'
