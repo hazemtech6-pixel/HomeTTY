@@ -91,3 +91,8 @@ prebuilt content. Desktop setup selects `hometty-x11` for X11 or `tigervnc` for 
 all desktop recipes use the configured signed custom-prefix APT sources and leave
 APT/dpkg confirmation prompts interactive. GNOME still needs custom source-built
 `gnome-shell` and `gnome-session`; no stock release archive is substituted.
+
+Repository generation audits, hashes and copies one package snapshot. Existing
+content-addressed pool objects are checked for corruption. Indexes and signed
+release files are atomically replaced; immutable SHA256 `by-hash` indexes remain
+available so APT can use either signed release during a local repository refresh.

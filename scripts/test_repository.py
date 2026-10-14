@@ -49,7 +49,16 @@ class RepositoryTest(unittest.TestCase):
             with self.assertRaises(ValueError): build(self.root, destination, key_home, [extra])
             self.assertEqual(data, gzip.decompress((destination / 'dists/stable/main/binary-x86_64/Packages.gz').read_bytes()))
             self.assertIn(hashlib.sha256(data).hexdigest(), (destination / 'dists/stable/Release').read_text())
+            hashed = destination / 'dists/stable/main/binary-x86_64/by-hash/SHA256' / hashlib.sha256(data).hexdigest()
+            self.assertEqual(data, hashed.read_bytes())
+            self.assertIn('Acquire-By-Hash: yes', (destination / 'dists/stable/Release').read_text())
             self.assertEqual(b'', (destination / 'dists/stable/main/binary-aarch64/Packages').read_bytes())
+            # A corrupted immutable pool object must not be reused or advertised.
+            package(extra, name='fixture-extra')
+            (destination / f'pool/{digest}.deb').write_bytes(b'corrupt')
+            release = (destination / 'dists/stable/InRelease').read_bytes()
+            with self.assertRaises(ValueError): build(self.root, destination, key_home, [extra])
+            self.assertEqual(release, (destination / 'dists/stable/InRelease').read_bytes())
         finally:
             subprocess.run(['gpgconf', '--homedir', str(key_home), '--kill', 'gpg-agent'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
