@@ -83,11 +83,57 @@ HOMETTY_MIRRORS
 # HOMETTY_HELPER_END
 """
     text = tools.read_text()
+    if '# HOMETTY_PREFIX_BEGIN' in text:
+        text = text[:text.index('# HOMETTY_PREFIX_BEGIN')] + text[text.index('# HOMETTY_PREFIX_END') + len('# HOMETTY_PREFIX_END'):]
+    for dispatcher in (
+        'termux_step_post_get_source() { termux_hometty_prepare_helpers; termux_hometty_adapt_source; }',
+        'termux_hometty_prepare_helpers() { termux_hometty_prepare_helpers; termux_hometty_adapt_source; }',
+    ):
+        text = text.replace(dispatcher, '')
     if '# HOMETTY_HELPER_BEGIN' in text:
         text = text[:text.index('# HOMETTY_HELPER_BEGIN')] + text[text.index('# HOMETTY_HELPER_END') + len('# HOMETTY_HELPER_END'):]
     elif 'HOMETTY_HELPER' in text:
         text = text[:text.index('\ntermux_step_post_get_source()')]
     tools.write_text(text.rstrip() + '\n' + addition)
+    # Package-local upstream defaults are independent of the build prefix. Adapt
+    # source text before compilation; never patch compiled ELF files in place.
+    for package in ('termux-api', 'termux-exec', 'termux-tools'):
+        script = root / 'packages' / package / 'build.sh'
+        source = script.read_text()
+        begin, end = '# HOMETTY_PREFIX_BEGIN', '# HOMETTY_PREFIX_END'
+        if begin in source:
+            source = source[:source.index(begin)] + source[source.index(end) + len(end):]
+        hook = f"""
+# HOMETTY_PREFIX_BEGIN
+export TERMUX_APP_PACKAGE={APPLICATION_ID}
+export TERMUX_PREFIX
+termux_hometty_adapt_source() {{
+    python3 - "$TERMUX_PKG_SRCDIR" <<'HOMETTY_SOURCE'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+for path in root.rglob('*'):
+    if not path.is_file() or path.is_symlink(): continue
+    try: text = path.read_text(encoding='utf-8')
+    except (UnicodeError, OSError): continue
+    replacement = text.replace('/data/data/com.termux/', '/data/data/{APPLICATION_ID}/')
+    if '{package}' == 'termux-api':
+        replacement = replacement.replace('com.termux.api', '{APPLICATION_ID}.api')
+    if replacement != text: path.write_text(replacement, encoding='utf-8')
+HOMETTY_SOURCE
+}}
+# HOMETTY_PREFIX_END
+"""
+        # Keep the existing tool wrapper adaptation and run both source hooks.
+        if package == 'termux-tools':
+            source = source.replace('termux_step_post_get_source() {', 'termux_hometty_prepare_helpers() {', 1)
+            hook += '\ntermux_step_post_get_source() { termux_hometty_prepare_helpers; termux_hometty_adapt_source; }\n'
+        else:
+            hook += '\ntermux_step_post_get_source() { termux_hometty_adapt_source; }\n'
+        # Remove previously appended dispatcher when applying the overlay again.
+        source = source.replace('\ntermux_step_post_get_source() { termux_hometty_prepare_helpers; termux_hometty_adapt_source; }\n', '\n').replace('\ntermux_step_post_get_source() { termux_hometty_adapt_source; }\n', '\n')
+        script.write_text(source.rstrip() + '\n' + hook)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

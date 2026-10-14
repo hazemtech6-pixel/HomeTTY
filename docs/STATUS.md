@@ -49,3 +49,9 @@ Android 16/API 36 x86_64 is installed and booted with hardware graphics, four
 virtual CPU cores and 4 GB guest RAM. HomeTTY installed and its Home activity was
 launched successfully. This is the user’s interactive emulator; UI automation is
 paused while it is being used. Broader Android 16 compatibility checks remain pending.
+
+Custom-prefix audit found remaining stock paths in upstream API/tools sources
+and an exec-helper script comment. Source adaptations have been added; these
+packages must be rebuilt and pass the audit before the existing x86_64 bootstrap
+can be bundled. The other architectures continue building. The current emulator
+APK therefore still stops Linux setup at the bootstrap verification boundary.

@@ -53,7 +53,7 @@ def inspect_deb(path, snapshot=None):
                     if member.size > 1048576: raise ValueError('Oversized control file')
                     content = archive.extractfile(member).read()
                     if PurePosixPath(member.name).name == 'control': control = content.decode('utf-8')
-                    elif STOCK in content: raise ValueError('Stock prefix in maintainer script')
+                    elif STOCK in content: raise ValueError(f'Stock prefix in maintainer script: {path.name}: {member.name}')
         elif name.startswith('data.tar.'):
             saw_data = True
             with tarfile.open(fileobj=io.BytesIO(data), mode='r:*') as archive:
@@ -75,7 +75,7 @@ def inspect_deb(path, snapshot=None):
                             tail = first
                             while chunk := content.read(65536):
                                 tail += chunk
-                                if STOCK in tail: raise ValueError('Stock-prefix executable')
+                                if STOCK in tail: raise ValueError(f'Stock-prefix executable: {path.name}: {member.name}')
                                 tail = tail[-len(STOCK):]
     if 'debian-binary' not in names or control is None or not saw_data: raise ValueError('Incomplete Debian package')
     last = None
