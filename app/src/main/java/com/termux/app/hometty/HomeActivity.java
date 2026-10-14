@@ -43,9 +43,10 @@ public final class HomeActivity extends Activity {
     private int homePage;
     private String pendingIcon;
     private String pendingUpdate;
+    private final List<Dialog> backgroundDialogs=new ArrayList<>();
     private Runnable afterAuthentication;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17, PICK_ICON = 18, PICK_APP_UPDATE = 19;
+    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17, PICK_ICON = 18, PICK_APP_UPDATE = 19, BACKUP_HOME = 20, RESTORE_HOME = 21;
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) { if ("Apps".equals(selected) || "Home".equals(selected)) show(selected); }
     };
@@ -97,7 +98,7 @@ public final class HomeActivity extends Activity {
     }
     @Override protected void onStart() { super.onStart(); if (widgets != null) widgets.startListening(); }
     @Override protected void onStop() { ActivityLock.stop(this); cancelAi(); if (widgets != null) widgets.stopListening(); super.onStop(); }
-    @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); indexWorker.shutdownNow(); if (aiWorker!=null) aiWorker.shutdownNow(); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
+    @Override protected void onDestroy() { for (Dialog dialog:backgroundDialogs) dialog.dismiss(); backgroundDialogs.clear(); handler.removeCallbacksAndMessages(null); indexWorker.shutdownNow(); if (aiWorker!=null) aiWorker.shutdownNow(); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
     @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); out.putString("icon",pendingIcon); out.putInt("home_page",homePage); out.putString("update",pendingUpdate); }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if (config != null) show("Home"); }
     @Override public void onBackPressed() { if (config != null) show("Home"); }
@@ -513,11 +514,41 @@ public final class HomeActivity extends Activity {
         action("Settings TUI", this::settingsTui);
         action("Edit in terminal", () -> ShellCommands.run(this,"${EDITOR:-vi} \"$HOME/.config/hometty/config.toml\""));
         action("Updates",this::updates);
+        action("Back up Home files", () -> confirm("Create a Home-file archive in your chosen storage provider? It includes private Home files and portable state; cache, symlinks, Keystore secrets and Android/plugin grants are excluded.", () -> openForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/zip").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"hometty-home.zip"),BACKUP_HOME)));
+        action("Restore Home files", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/zip").addCategory(Intent.CATEGORY_OPENABLE),RESTORE_HOME));
         action("Back up configuration", () -> openForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/toml").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"hometty-config.toml"),BACKUP));
         action("Restore configuration", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),RESTORE));
         action(HomePassword.configured() ? "Change HomeTTY password / PIN" : "Set HomeTTY password / PIN", () -> deviceAuthentication(() -> HomePassword.prompt(this, true, () -> { toast("HomeTTY password saved; enable the desired lock flags in TOML"); settings(); }, () -> {})));
         if (HomePassword.configured()) action("Remove HomeTTY password / PIN", () -> deviceAuthentication(() -> confirm("Remove the HomeTTY password? Enabled locks will use Android credentials.", () -> { HomePassword.remove(); settings(); })));
         action("Terminal preferences", () -> open(new Intent(this,com.termux.app.activities.SettingsActivity.class)));
+    }
+    private interface ArchiveWork { String run(HomeArchive.Progress progress) throws Exception; }
+    private void archiveWork(String title,ArchiveWork work,java.util.function.Consumer<String> done) {
+        TextView status=new TextView(this); status.setTypeface(android.graphics.Typeface.MONOSPACE); status.setPadding(dp(16),dp(16),dp(16),dp(16)); status.setText("Starting…");
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(title).setView(status).setNegativeButton("Keep in background",null).create(); backgroundDialogs.add(dialog); dialog.show();
+        indexWorker.execute(() -> {
+            long[] last={0}; String result=null,failure=null;
+            HomeArchive.Progress progress=(bytes,files) -> { long now=SystemClock.elapsedRealtime(); if (now-last[0]<250) return; last[0]=now;
+                runOnUiThread(() -> { if (!isDestroyed() && dialog.isShowing()) status.setText(files+" files · "+(bytes/1024)+" KiB"); }); };
+            try { result=work.run(progress); } catch (Exception error) { failure=error.getMessage(); }
+            final String value=result,message=failure;
+            runOnUiThread(() -> { if (isFinishing() || isDestroyed()) return; dialog.dismiss(); backgroundDialogs.remove(dialog); if (message!=null) toast(message); else done.accept(value); });
+        });
+    }
+    private void homeBackup(Uri destination) {
+        archiveWork("Back up Home files",progress -> {
+            try (OutputStream output=getContentResolver().openOutputStream(destination,"wt")) { if (output==null) throw new IOException("Cannot open backup destination"); HomeArchive.create(HomeConfig.HOME,output,progress); }
+            return "Home files backed up. Device secrets, grants, symlinks and cache are excluded.";
+        },this::toast);
+    }
+    private void homeRestore(Uri source) {
+        final HomeArchive.Staged[] staged={null};
+        archiveWork("Validate Home backup",progress -> {
+            try (InputStream input=getContentResolver().openInputStream(source)) { if (input==null) throw new IOException("Cannot open Home backup"); staged[0]=HomeArchive.stage(input,HomeConfig.CACHE,progress); }
+            return staged[0].files.size()+" files · "+(staged[0].bytes/1024)+" KiB";
+        },summary -> confirm("Merge this validated backup into Home?\n"+summary+"\nExisting files are retained for recovery. Android permissions and plugin grants are not imported.", () -> authenticate("security.lock_settings", () -> archiveWork("Restore Home files",progress -> {
+            HomeArchive.restore(staged[0],HomeConfig.HOME,progress); return "Home files restored; replaced originals are retained in the restore staging folder.";
+        },message -> { try { config=new HomeConfig(); state=new LauncherState(); loadedConfiguration=HomeConfig.read(); indexedAt=0; selected="Home"; build(); toast(message); } catch (Exception error) { configurationError(error); } }))));
     }
     private void updates() {
         content.removeAllViews(); text("Updates",26);
@@ -807,6 +838,10 @@ public final class HomeActivity extends Activity {
         }
         if (request==REQUEST_HOME) {
             if (Build.VERSION.SDK_INT>=29 && getSystemService(RoleManager.class).isRoleHeld(RoleManager.ROLE_HOME)) toast("HomeTTY is your default Home");
+            return;
+        }
+        if (request==BACKUP_HOME || request==RESTORE_HOME) {
+            if (result==RESULT_OK && data!=null && data.getData()!=null) authenticate("security.lock_settings", () -> { if (request==BACKUP_HOME) homeBackup(data.getData()); else homeRestore(data.getData()); });
             return;
         }
         if (request==PICK_APP_UPDATE) {

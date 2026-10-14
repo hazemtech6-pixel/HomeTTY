@@ -122,3 +122,8 @@ lifecycle behavior remain pending.
 - Local APK update: reject wrong package/signature and old/equal versions; test a
   newer APK with the common private signer, Android installation consent, unknown
   source permission return, activity recreation and restart after package replace.
+
+- Home-file backup/restore: export through several SAF providers, review/merge
+  into Home, verify file/empty-directory/executable handling and retained originals,
+  confirm secrets/grants/cache exclusion, test full storage, large archives and
+  interrupted operations. Process-death restore recovery remains unfinished.
