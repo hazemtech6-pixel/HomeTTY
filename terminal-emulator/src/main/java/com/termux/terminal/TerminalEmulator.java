@@ -210,6 +210,17 @@ public final class TerminalEmulator {
     private static final int DECSET_BIT_LEFTRIGHT_MARGIN_MODE = 1 << 11;
     /** Not really DECSET bit... - http://www.vt100.net/docs/vt510-rm/DECSACE */
     private static final int DECSET_BIT_RECTANGULAR_CHANGEATTRIBUTE = 1 << 12;
+    private static final int DECSET_BIT_SYNCHRONIZED_OUTPUT = 1 << 13;
+    private long mSynchronizedOutputDeadline;
+    private boolean mSynchronizedOutputRequested;
+    public boolean hasRequestedSynchronizedOutput() { return mSynchronizedOutputRequested; }
+
+    /** Modern TUI frame batching; a broken producer cannot freeze output forever. */
+    public boolean isSynchronizedOutput() {
+        if (isDecsetInternalBitSet(DECSET_BIT_SYNCHRONIZED_OUTPUT) && System.nanoTime() >= mSynchronizedOutputDeadline)
+            setDecsetinternalBit(DECSET_BIT_SYNCHRONIZED_OUTPUT, false);
+        return isDecsetInternalBitSet(DECSET_BIT_SYNCHRONIZED_OUTPUT);
+    }
 
 
     private String mTitle;
@@ -487,6 +498,8 @@ public final class TerminalEmulator {
                 return DECSET_BIT_MOUSE_PROTOCOL_SGR;
             case 2004:
                 return DECSET_BIT_BRACKETED_PASTE_MODE;
+            case 2026:
+                return DECSET_BIT_SYNCHRONIZED_OUTPUT;
             default:
                 return -1;
             // throw new IllegalArgumentException("Unsupported decset: " + decsetBit);
@@ -1072,6 +1085,7 @@ public final class TerminalEmulator {
                         if (b == 'p') {
                             // Request DEC private mode (DECRQM).
                             int mode = getArg0(0);
+                            if (mode == 2026) { mSynchronizedOutputRequested=true; isSynchronizedOutput(); }
                             int value;
                             if (mode == 47 || mode == 1047 || mode == 1049) {
                                 // This state is carried by mScreen pointer.
@@ -1791,6 +1805,10 @@ public final class TerminalEmulator {
             setDecsetinternalBit(internalBit, setting);
         }
         switch (externalBit) {
+            case 2026:
+                mSynchronizedOutputRequested=true;
+                mSynchronizedOutputDeadline = setting ? System.nanoTime() + 1_000_000_000L : 0;
+                break;
             case 1: // Application Cursor Keys (DECCKM).
                 break;
             case 3: // Set: 132 column mode (. Reset: 80 column mode. ANSI name: DECCOLM.

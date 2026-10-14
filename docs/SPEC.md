@@ -5,7 +5,7 @@ HomeTTY is an Android-only GPLv3 fork of Termux, application ID
 must remain locally buildable; publication and GitHub setup are out of scope.
 
 ## Experience
-Minimal, normal, terminal-first Android design. Tabs: Home, Apps, Terminal, Tools,
+Terminal-themed, terminal-first Android design: prompt-style navigation/search and monospace status output, with real graphical app icons, images and native widgets integrated as supporting surfaces. Avoid a conventional button-heavy GUI dashboard. Tabs: Home, Apps, Terminal, Tools,
 Desktop, Settings, and AI only when explicitly enabled. Home has configurable
 widgets, real icons, pages, optional dock, wallpaper, long-press actions and normal
 launcher behavior. Support Android AppWidgetHost integration into reserved regions.
@@ -76,3 +76,10 @@ and provide an exact implementation/status matrix and reproducible build command
 - The initial optional built-in AI adapter uses Ollama. User-selected server/model
   live in TOML; optional credentials are endpoint-bound Keystore records. There is
   no default network activity or automatic execution of generated responses.
+
+## User design correction (2026-10-14)
+
+The HOME surface must look and behave like a terminal-themed launcher with real
+icons and graphical content, rather than a conventional GUI home screen. Modernize
+the terminal experience and test on a recent Android emulator, preserving the
+working emulator, PTY and service architecture.

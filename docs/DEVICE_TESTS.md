@@ -115,3 +115,10 @@ Observed on the API 29 x86_64 emulator: configured pages and an empty slot survi
 activity recreation; an injected Android touch drag swapped Calendar and Camera
 and persisted the arrangement into `home.layout`. Physical touch and vendor HOME
 lifecycle behavior remain pending.
+
+- Terminal modernization: render a DEC 2026 TUI frame, confirm partial redraws
+  stay hidden until release, test the one-second timeout, resize/rotate/switch
+  sessions, and measure image/scroll performance on high-density devices.
+- Local APK update: reject wrong package/signature and old/equal versions; test a
+  newer APK with the common private signer, Android installation consent, unknown
+  source permission return, activity recreation and restart after package replace.

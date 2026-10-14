@@ -42,9 +42,10 @@ public final class HomeActivity extends Activity {
     private int pendingWidget = -1;
     private int homePage;
     private String pendingIcon;
+    private String pendingUpdate;
     private Runnable afterAuthentication;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17, PICK_ICON = 18;
+    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17, PICK_ICON = 18, PICK_APP_UPDATE = 19;
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) { if ("Apps".equals(selected) || "Home".equals(selected)) show(selected); }
     };
@@ -52,7 +53,7 @@ public final class HomeActivity extends Activity {
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-        if (saved != null) { selected = saved.getString("tab", "Home"); pendingWidget = saved.getInt("widget", -1); pendingIcon=saved.getString("icon"); homePage=saved.getInt("home_page",0); }
+        if (saved != null) { selected = saved.getString("tab", "Home"); pendingWidget = saved.getInt("widget", -1); pendingIcon=saved.getString("icon"); homePage=saved.getInt("home_page",0); pendingUpdate=saved.getString("update"); }
         try { config = new HomeConfig(); loadedConfiguration = HomeConfig.read(); state = new LauncherState(); }
         catch (Exception e) { configurationError(e); return; }
         widgets = new AppWidgetHost(this, 1024);
@@ -97,14 +98,15 @@ public final class HomeActivity extends Activity {
     @Override protected void onStart() { super.onStart(); if (widgets != null) widgets.startListening(); }
     @Override protected void onStop() { ActivityLock.stop(this); cancelAi(); if (widgets != null) widgets.stopListening(); super.onStop(); }
     @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); indexWorker.shutdownNow(); if (aiWorker!=null) aiWorker.shutdownNow(); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
-    @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); out.putString("icon",pendingIcon); out.putInt("home_page",homePage); }
+    @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); out.putString("icon",pendingIcon); out.putInt("home_page",homePage); out.putString("update",pendingUpdate); }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if (config != null) show("Home"); }
     @Override public void onBackPressed() { if (config != null) show("Home"); }
     private void build() {
         activePlugins=LocalPlugin.list(); activeTheme=null;
         String theme=config.string("theme.plugin","");
         for (LocalPlugin plugin:activePlugins) if ("theme".equals(plugin.manifest.surface) && plugin.manifest.id.equals(theme) && plugin.granted(state)) activeTheme=plugin;
-        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(16,16,16,8); root.setBackgroundColor(themeColor("background",0xcc101418)); setContentView(root);
+        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(12),dp(8),dp(12),dp(8)); root.setBackgroundColor(themeColor("background",0xf2081117)); setContentView(root);
+        TextView sessionTitle=new TextView(this); sessionTitle.setText("hometty  •  android / local"); sessionTitle.setTypeface(android.graphics.Typeface.MONOSPACE); sessionTitle.setTextSize(12); sessionTitle.setTextColor(themeColor("accent",0xff70d6ac)); sessionTitle.setPadding(0,0,0,dp(8)); root.addView(sessionTitle);
         HorizontalScrollView navigation = new HorizontalScrollView(this); navigation.setHorizontalScrollBarEnabled(false);
         tabs = new LinearLayout(this); navigation.addView(tabs); root.addView(navigation);
         for (String name : new String[]{"Home", "Apps", "Terminal", "Tools", "Desktop", "Settings"}) tab(name);
@@ -123,10 +125,18 @@ public final class HomeActivity extends Activity {
         if (activeTheme==null || !activeTheme.granted(state)) return fallback;
         String value=activeTheme.manifest.colors.get(name); return value==null?fallback:Color.parseColor(value);
     }
-    private void styleButton(Button button) { if (activeTheme!=null && activeTheme.granted(state)) { button.setTextColor(themeColor("foreground",Color.WHITE)); button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(themeColor("accent",0xff354552))); } }
+    private void styleButton(Button button) {
+        button.setTypeface(android.graphics.Typeface.MONOSPACE); button.setAllCaps(false); button.setTextSize(12);
+        button.setTextColor(themeColor("accent",0xff70d6ac)); button.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
+        button.setMinHeight(dp(40)); button.setMinimumHeight(dp(40)); button.setMinWidth(0); button.setMinimumWidth(0);
+        button.setPadding(dp(8),0,dp(8),0);
+        android.graphics.drawable.StateListDrawable background=new android.graphics.drawable.StateListDrawable();
+        background.addState(new int[]{android.R.attr.state_pressed},new android.graphics.drawable.ColorDrawable(0xff16302b));
+        background.addState(new int[]{},new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)); button.setBackground(background);
+    }
     private int dp(int size) { return Math.round(size*getResources().getDisplayMetrics().density); }
-    private TextView text(String value, int size) { TextView view = new TextView(this); view.setText(value); view.setTextColor(themeColor("foreground",Color.WHITE)); view.setTextSize(size); view.setPadding(8,12,8,12); content.addView(view); return view; }
-    private Button action(String label, Runnable runnable) { Button view = new Button(this); view.setText(label); styleButton(view); content.addView(view); view.setOnClickListener(v -> runnable.run()); return view; }
+    private TextView text(String value, int size) { TextView view = new TextView(this); view.setText(value); view.setTypeface(android.graphics.Typeface.MONOSPACE); view.setTextColor(themeColor("foreground",Color.WHITE)); view.setTextSize(size); view.setPadding(0,dp(6),0,dp(6)); content.addView(view); return view; }
+    private Button action(String label, Runnable runnable) { Button view = new Button(this); view.setText("> "+label); view.setContentDescription(label); styleButton(view); content.addView(view); view.setOnClickListener(v -> runnable.run()); return view; }
     private void show(String name) {
         if (!"AI".equals(name) || "AI".equals(selected)) cancelAi();
         selected = name; configurationEditor = null; configurationBaseline = null; content.removeAllViews();
@@ -142,19 +152,21 @@ public final class HomeActivity extends Activity {
     }
     private void home() {
         if (config.flag("home.clock", true)) {
-            TextClock clock = new TextClock(this); clock.setTextSize(42); clock.setTextColor(themeColor("foreground",Color.WHITE)); clock.setFormat12Hour("h:mm a"); clock.setFormat24Hour("HH:mm"); content.addView(clock);
+            TextClock clock = new TextClock(this); clock.setTypeface(android.graphics.Typeface.MONOSPACE); clock.setTextSize(26); clock.setTextColor(themeColor("foreground",Color.WHITE)); clock.setFormat12Hour("h:mm a"); clock.setFormat24Hour("HH:mm"); content.addView(clock);
             clock.setOnClickListener(v -> open(new Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)));
         }
-        text(java.text.DateFormat.getDateInstance(java.text.DateFormat.FULL).format(new Date()), 16);
+        text("~ / home  •  "+java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(new Date()),12);
         Intent battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        if (battery != null) { int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE,100); text("Battery " + battery.getIntExtra(BatteryManager.EXTRA_LEVEL,0) * 100 / Math.max(1,scale) + "%",14).setOnClickListener(v -> open(new Intent(Intent.ACTION_POWER_USAGE_SUMMARY))); }
+        if (battery != null) { int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE,100); text("battery  " + battery.getIntExtra(BatteryManager.EXTRA_LEVEL,0) * 100 / Math.max(1,scale) + "%",14).setOnClickListener(v -> open(new Intent(Intent.ACTION_POWER_USAGE_SUMMARY))); }
         if (config.flag("weather.enabled",false)) weather();
         if (config.flag("home.media",false)) media();
         android.net.ConnectivityManager network=getSystemService(android.net.ConnectivityManager.class);
         android.net.NetworkInfo active=network.getActiveNetworkInfo();
-        text(active!=null && active.isConnected() ? "Network: "+active.getTypeName() : "Offline",14).setOnClickListener(v -> open(new Intent(Settings.ACTION_WIFI_SETTINGS)));
-        renderHomePages();
+        text(active!=null && active.isConnected() ? "network  "+active.getTypeName().toLowerCase(Locale.ROOT) : "network  offline",14).setOnClickListener(v -> open(new Intent(Settings.ACTION_WIFI_SETTINGS)));
+        text("hometty@android:~ $",14);
         search();
+        text("./apps",12);
+        renderHomePages();
         if (config.flag("home.dock", true)) { text("Pinned apps",18); renderApps("", true, content); }
         for (int id : widgetIds()) {
             AppWidgetProviderInfo info = AppWidgetManager.getInstance(this).getAppWidgetInfo(id);
@@ -183,7 +195,7 @@ public final class HomeActivity extends Activity {
     private android.graphics.drawable.Drawable appIcon(ResolveInfo item) { android.graphics.drawable.Drawable custom=HomeIcons.load(this,config,id(item)); return custom==null?item.loadIcon(getPackageManager()):custom; }
     private void apps() { text("Apps",26); search(); }
     private void search() {
-        EditText query = new EditText(this); query.setSingleLine(true); query.setHint("Search · app: · shell: · desktop: · file: · web:"); query.setTextColor(themeColor("foreground",Color.WHITE)); content.addView(query);
+        EditText query = new EditText(this); query.setSingleLine(true); query.setHint("Search · app: · shell: · desktop: · file: · web:"); query.setTypeface(android.graphics.Typeface.MONOSPACE); query.setTextSize(12); query.setHintTextColor(0xff7d949f); query.setBackgroundTintList(android.content.res.ColorStateList.valueOf(themeColor("accent",0xff70d6ac))); query.setTextColor(themeColor("foreground",Color.WHITE)); content.addView(query);
         LinearLayout results = new LinearLayout(this); results.setOrientation(LinearLayout.VERTICAL); content.addView(results);
         Runnable update = () -> searchResults(query.getText().toString().trim(), results);
         query.addTextChangedListener(new TextWatcher() { public void beforeTextChanged(CharSequence s,int start,int count,int after) {} public void onTextChanged(CharSequence s,int start,int before,int count) { update.run(); } public void afterTextChanged(Editable value) {} });
@@ -246,7 +258,7 @@ public final class HomeActivity extends Activity {
     private LinearLayout appTile(ResolveInfo item) {
         LinearLayout tile = new LinearLayout(this); tile.setGravity(Gravity.CENTER); tile.setOrientation(LinearLayout.VERTICAL); tile.setPadding(8,12,8,12);
             ImageView icon = new ImageView(this); icon.setImageDrawable(appIcon(item)); tile.addView(icon,new LinearLayout.LayoutParams(dp(48),dp(48)));
-            TextView label = new TextView(this); label.setText(label(item)); label.setTextSize(12); label.setTextColor(themeColor("foreground",Color.WHITE)); label.setGravity(Gravity.CENTER); label.setMaxLines(2); label.setEllipsize(android.text.TextUtils.TruncateAt.END); tile.addView(label);
+            TextView label = new TextView(this); label.setText(label(item)); label.setTypeface(android.graphics.Typeface.MONOSPACE); label.setTextSize(11); label.setTextColor(themeColor("foreground",Color.WHITE)); label.setGravity(Gravity.CENTER); label.setMaxLines(2); label.setEllipsize(android.text.TextUtils.TruncateAt.END); tile.addView(label);
             tile.setContentDescription(label(item)); tile.setFocusable(true); tile.setOnClickListener(v -> authenticate("security.lock_apps", () -> {
                 Intent launch = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName.unflattenFromString(id(item))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                 if (open(launch)) put("uses." + id(item), Integer.toString(Math.min(Integer.MAX_VALUE-1,state.uses(id(item)))+1));
@@ -269,7 +281,7 @@ public final class HomeActivity extends Activity {
         Map<String,ResolveInfo> apps=new HashMap<>(); for (ResolveInfo app:activities()) apps.put(id(app),app);
         LinearLayout navigation=new LinearLayout(this); content.addView(navigation);
         Button previous=new Button(this),nextPage=new Button(this); previous.setText("‹"); nextPage.setText("›"); styleButton(previous); styleButton(nextPage);
-        TextView indicator=new TextView(this); indicator.setText("Page "+(homePage+1)+" / "+layout.pages()); indicator.setGravity(Gravity.CENTER); indicator.setTextColor(themeColor("foreground",Color.WHITE));
+        TextView indicator=new TextView(this); indicator.setTypeface(android.graphics.Typeface.MONOSPACE); indicator.setTextSize(12); indicator.setText("Page "+(homePage+1)+" / "+layout.pages()); indicator.setGravity(Gravity.CENTER); indicator.setTextColor(themeColor("foreground",Color.WHITE));
         navigation.addView(previous); navigation.addView(indicator,new LinearLayout.LayoutParams(0,-2,1)); navigation.addView(nextPage);
         previous.setEnabled(homePage>0); nextPage.setEnabled(homePage+1<layout.pages());
         previous.setOnClickListener(view -> { homePage--; show("Home"); }); nextPage.setOnClickListener(view -> { homePage++; show("Home"); });
@@ -500,11 +512,40 @@ public final class HomeActivity extends Activity {
         action("Validate and save", () -> { try { if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed externally; reopen Settings before saving"); HomeConfig.save(editor.getText().toString()); loadedConfiguration = HomeConfig.read(); config = new HomeConfig(); selected = "Home"; build(); } catch (Exception e) { toast(e.getMessage()); } });
         action("Settings TUI", this::settingsTui);
         action("Edit in terminal", () -> ShellCommands.run(this,"${EDITOR:-vi} \"$HOME/.config/hometty/config.toml\""));
+        action("Updates",this::updates);
         action("Back up configuration", () -> openForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/toml").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"hometty-config.toml"),BACKUP));
         action("Restore configuration", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),RESTORE));
         action(HomePassword.configured() ? "Change HomeTTY password / PIN" : "Set HomeTTY password / PIN", () -> deviceAuthentication(() -> HomePassword.prompt(this, true, () -> { toast("HomeTTY password saved; enable the desired lock flags in TOML"); settings(); }, () -> {})));
         if (HomePassword.configured()) action("Remove HomeTTY password / PIN", () -> deviceAuthentication(() -> confirm("Remove the HomeTTY password? Enabled locks will use Android credentials.", () -> { HomePassword.remove(); settings(); })));
         action("Terminal preferences", () -> open(new Intent(this,com.termux.app.activities.SettingsActivity.class)));
+    }
+    private void updates() {
+        content.removeAllViews(); text("Updates",26);
+        action("Install a newer HomeTTY APK", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/vnd.android.package-archive").addCategory(Intent.CATEGORY_OPENABLE),PICK_APP_UPDATE));
+        action("Review Linux package updates", () -> authenticate("security.lock_terminal", () -> ShellCommands.run(this,"apt-get -o APT::Status-Fd=1 update && apt list --upgradable")));
+        action("Upgrade Linux packages", () -> confirm("Upgrade packages from your configured signed HomeTTY repositories? Review and answer APT prompts in the terminal.", () -> authenticate("security.lock_terminal", () -> ShellCommands.run(this,"apt-get update && apt-get -o APT::Status-Fd=1 upgrade"))));
+        action("Review plugin catalog updates",this::plugins);
+        action("Bundled companion installers",this::companions);
+    }
+    private void reviewAppUpdate(Uri source) {
+        indexWorker.execute(() -> {
+            File staged=null; String failure=null;
+            try (InputStream input=getContentResolver().openInputStream(source)) { if (input==null) throw new IOException("Cannot open update APK"); staged=AppUpdateInstaller.stage(this,input); }
+            catch (Exception error) { failure=error.getMessage(); }
+            final File file=staged; final String message=failure;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (message!=null) { toast(message); return; }
+                try {
+                    android.content.pm.PackageInfo archive=AppUpdateInstaller.verify(this,file);
+                    confirm("Install HomeTTY "+archive.versionName+"? Android will verify the APK and ask for installation consent.", () -> authenticate("security.lock_settings", () -> requestAppUpdate(file)));
+                } catch (Exception error) { toast(error.getMessage()); }
+            });
+        });
+    }
+    private void requestAppUpdate(File file) {
+        try { pendingUpdate=file.getName(); if (AppUpdateInstaller.request(this,file)) pendingUpdate=null; }
+        catch (Exception error) { pendingUpdate=null; toast(error.getMessage()); }
     }
     private void settingsTui() {
         File python = new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH, "bin/python3");
@@ -768,6 +809,16 @@ public final class HomeActivity extends Activity {
             if (Build.VERSION.SDK_INT>=29 && getSystemService(RoleManager.class).isRoleHeld(RoleManager.ROLE_HOME)) toast("HomeTTY is your default Home");
             return;
         }
+        if (request==PICK_APP_UPDATE) {
+            if (result==RESULT_OK && data!=null && data.getData()!=null) authenticate("security.lock_settings", () -> reviewAppUpdate(data.getData()));
+            return;
+        }
+        if (request==AppUpdateInstaller.REQUEST_SOURCE) {
+            String name=pendingUpdate; pendingUpdate=null;
+            if (name!=null && name.matches("app-update-[a-f0-9]{64}\\.apk") && (Build.VERSION.SDK_INT<26 || getPackageManager().canRequestPackageInstalls())) authenticate("security.lock_settings", () -> requestAppUpdate(new File(getFilesDir(),"hometty-companions/"+name)));
+            return;
+        }
+        if (request==AppUpdateInstaller.REQUEST_INSTALL) { toast(result==RESULT_OK?"Android accepted the update":"Update was not installed"); return; }
         if ((request==BACKUP || request==RESTORE || request==IMPORT_PLUGIN) && result==RESULT_OK && data!=null && data.getData()!=null) {
             try {
                 if (request==BACKUP) { try (OutputStream out=getContentResolver().openOutputStream(data.getData(),"wt")) { if (out==null) throw new IOException("Cannot open destination"); out.write(HomeConfig.read().getBytes(java.nio.charset.StandardCharsets.UTF_8)); } toast("Configuration backed up; secrets and runtime grants are excluded"); }

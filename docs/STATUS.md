@@ -7,9 +7,9 @@ HomeTTY's rules/specification; this continuation adds native launcher integratio
 | Area | Implemented | Remaining / limits |
 | --- | --- | --- |
 | Identity/provenance | Distinct HomeTTY ID, namespaced paths/permissions, retained upstream Java classes/licenses, pinned source audit, local debug signing | Private common production/companion signing |
-| HOME launcher | MAIN/HOME/DEFAULT, HOME chooser, launcher tabs, Android wallpaper, real app icons, TOML pin selection, configurable columns/rows, paged app grid, local drag/drop and page placement saved in TOML, dock, clock/battery/network | Full widget tap-action configuration, widget placement into page regions, swipe navigation and adaptive layout polish |
+| HOME launcher | MAIN/HOME/DEFAULT, HOME chooser, terminal-themed prompt/status/navigation, launcher tabs, Android wallpaper, real app icons, TOML pin selection, configurable columns/rows, paged app grid, local drag/drop and page placement saved in TOML, dock, clock/battery/network | Full widget tap-action configuration, widget placement into page regions, swipe navigation and adaptive layout polish |
 | Apps | Search, pin/unpin, TOML app labels and bounded custom bitmap icons, app info/uninstall, live package refresh, Android shortcut launch | Work profiles, pinned-shortcut placement, complete icon-provider/device checks |
-| Terminal | Original emulator, JNI PTY, service, sessions, sixel/iTerm rendering retained; explicit system-shell entry | Rebuilt Linux bootstrap; regression/device/image rendering verification |
+| Terminal | Original emulator, JNI PTY, service, sessions, sixel/iTerm rendering retained; DEC 2026 synchronized frames with bounded cache/timeout; explicit system-shell entry | Rebuilt Linux bootstrap; regression/device/image rendering verification |
 | Smart Search | Live unified app/desktop/command/file search, pinned/usage ordering across results, explicit routes including desktop-web; background local index | Hidden-file/configurable indexing, work-profile indexing, desktop browser runtime verification |
 | Widgets | AppWidgetHost picker/configure/persistence/removal, clock/battery/network, optional Open-Meteo coordinates/provider boundary with coordinate-specific stale-labelled cache, opt-in media controls | Background refresh scheduling, per-widget tap actions, reserved-region layout |
 | Tools/files | Android settings/Wi-Fi/Bluetooth/calculator/calendar intents; private-home preview/create/rename/delete/open/share; persistent SAF tree browsing and supported create/rename/delete/share actions | Copy/move between storage providers, large text editing, full external-provider/device verification |
@@ -22,14 +22,14 @@ HomeTTY's rules/specification; this continuation adds native launcher integratio
 | Locks/secrets | Android device-credential UI gates; direct terminal/settings/setup entry guards; external RUN_COMMAND lock check; optional password/PIN enrollment/removal behind device credentials; Keystore-encrypted salted PBKDF2 record; persistent retry delay; background verification | Password UI/lifecycle/device regression checks, complete shell-widget lock handoff |
 | AI | Entirely absent by default; configured external agent command; optional Ollama chat frontend with cancel, memory-only history and endpoint-bound Keystore credentials | Real model/server and physical-device checks, external agent package setup, additional provider adapters |
 | Plugins | Declarative tool/command/widget/tab/theme/integration manifests; exact-content grants and revocation; per-shell-run confirmation; bundled official catalog and explicit public HTTPS/GitHub catalog browsing; checked manifest updates; sources and theme choice in TOML | Private catalog authentication, executable plugin package sandboxing, broader integration hooks, full catalog/theme/device checks |
-| Backup/update | SAF configuration-only backup/validated restore | Full-state/files backup, migration, companion/package/plugin/application updates |
+| Backup/update | SAF configuration-only backup/validated restore; guarded local APK update staging and explicit APT upgrade controls | Full-state/files backup, migration, remote application-update catalogs and positive APK installation verification; complete companion/package update orchestration |
 
 ## Verification
 
 - Python bootstrap boundary tests: 6 passed. Settings TUI logic tests: 5 passed. Signed repository tests: 2 passed.
 - Android debug APK assembly: successful for arm64-v8a, armeabi-v7a, x86,
   x86_64 and universal.
-- Upstream terminal-emulator host tests: 145 passed. Application host tests: 42 passed.
+- Terminal-emulator host tests: 147 passed, including synchronized-output mode/query/reset/timeout checks. Application host tests: 42 passed.
 - `:app:lintDebug`: passed, with existing and new nonfatal warnings (including English UI strings needing localization).
 - Android 10 x86_64 emulator: Home startup, real system-shell input/output, installer Android probe/state/log, real PTY prompt/state restore/raw output, SAF create/rename/read/path checks, Keystore tamper rejection, and asynchronous desktop search instrumentation passed (8 tests, including disabled-AI no-network/Ollama protocol checks, custom icon normalization/TOML loading, exact-content plugin widget grants, and resumable native desktop questions). The launcher tests background activities before cleanup to accommodate Android HOME lifecycle behavior. A separate Home-pages test passed for configured pages, empty slots and recreation; an emulator touch drag swapped two icons and persisted their layout in TOML.
 - API, Widget and Tasker installed through Android consent in the emulator. HOME role granted through Android consent and retained after pressing Home. X11 runtime checks ongoing.
@@ -44,3 +44,7 @@ dependency packages passed application-ID and payload checks.
 No host permissions or kernel settings are changed by the project. No physical
 Android device is connected. Android implementation and host testing continue;
 Linux/desktop runtime verification awaits the rebuilt packages.
+
+Android 16/API 36 x86_64 system image is downloading for modern compatibility
+checks. The existing API 29 emulator is open interactively for the user; UI
+automation is paused on that instance while it is being used.

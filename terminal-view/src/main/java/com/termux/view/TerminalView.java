@@ -1029,7 +1029,24 @@ public final class TerminalView extends View {
                 mTextSelectionCursorController.getSelectors(sel);
             }
 
-            mRenderer.render(mEmulator, canvas, mTopRow, sel[0], sel[1], sel[2], sel[3]);
+            boolean canCache = mEmulator.hasRequestedSynchronizedOutput() && getWidth() > 0 && getHeight() > 0 && (long)getWidth()*getHeight() <= 4_000_000 && !mFrameCacheUnavailable;
+            if (mSynchronizedFrame != null && (mSynchronizedFrame.getWidth()!=getWidth() || mSynchronizedFrame.getHeight()!=getHeight() || mFrameSession!=mTermSession)) {
+                mSynchronizedFrame.recycle(); mSynchronizedFrame=null;
+            }
+            if (canCache && mEmulator.isSynchronizedOutput()) {
+                if (mSynchronizedFrame!=null) canvas.drawBitmap(mSynchronizedFrame,0,0,null);
+                else canvas.drawColor(0xff000000);
+                postInvalidateDelayed(1000); return;
+            }
+            if (canCache && mSynchronizedFrame==null) {
+                try { mSynchronizedFrame=android.graphics.Bitmap.createBitmap(getWidth(),getHeight(),android.graphics.Bitmap.Config.ARGB_8888); mFrameSession=mTermSession; }
+                catch (OutOfMemoryError unavailable) { mFrameCacheUnavailable=true; }
+            }
+            if (canCache && mSynchronizedFrame!=null) {
+                Canvas frame=new Canvas(mSynchronizedFrame); frame.drawColor(0xff000000);
+                mRenderer.render(mEmulator,frame,mTopRow,sel[0],sel[1],sel[2],sel[3]);
+                canvas.drawBitmap(mSynchronizedFrame,0,0,null);
+            } else mRenderer.render(mEmulator, canvas, mTopRow, sel[0], sel[1], sel[2], sel[3]);
 
             // render the text selection handles
             renderTextSelection();
@@ -1039,6 +1056,11 @@ public final class TerminalView extends View {
     public TerminalSession getCurrentSession() {
         return mTermSession;
     }
+
+    private android.graphics.Bitmap mSynchronizedFrame;
+    private TerminalSession mFrameSession;
+    private boolean mFrameCacheUnavailable;
+
 
     private CharSequence getText() {
         return mEmulator.getScreen().getSelectedText(0, mTopRow, mEmulator.mColumns, mTopRow + mEmulator.mRows);
@@ -1461,6 +1483,8 @@ public final class TerminalView extends View {
 
     @Override
     protected void onDetachedFromWindow() {
+        if (mSynchronizedFrame!=null) { mSynchronizedFrame.recycle(); mSynchronizedFrame=null; }
+        mFrameCacheUnavailable=false;
         super.onDetachedFromWindow();
 
         if (mTextSelectionCursorController != null) {

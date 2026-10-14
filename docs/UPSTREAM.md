@@ -56,3 +56,10 @@ The pinned X11 native dependencies are recorded as Git submodules in .gitmodules
 Run scripts/build_debug.sh to build X11 and bundle all four companion APKs.
 Package builds use termux-packages `e950269dd7ad5d06069281c9b4d83559800c70e1`
 and builder digest `sha256:44999857244619e25bc8e3427904a16d36cc0c0e087704af039e5bdf94814ac9`.
+
+HomeTTY adds DEC mode 2026 synchronized output to the retained Termux engine,
+following [Contour’s synchronized-output specification](https://contour-terminal.org/vt-extensions/synchronized-output/).
+The view holds the preceding rendered frame while parsing continues, with a
+one-second producer timeout. Frame caching is activated only when requested and
+is bounded to four million pixels; oversized views or allocation failure use
+normal rendering. Native rendering/performance checks remain device work.
