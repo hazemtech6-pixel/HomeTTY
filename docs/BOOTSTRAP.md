@@ -76,3 +76,10 @@ The generator checks exact build identity, payload paths and executable prefixes
 creates hashed package indexes, Release/InRelease signatures, a public keyring and
 repository identity metadata. Unit tests verify signatures and package/index hashes.
 Client-side repository delivery and the complete desktop package set remain pending.
+
+The ncurses supplemental rxvt source uses Debian's mirror of the **identical**
+upstream 9.31 archive (SHA-256 `aaa13fcbc149fe0f3f391f933279580f74a96fd312d6ed06b8ff03c2d46672e8`)
+when the original distribution server is unavailable. No source checksum changed.
+Interrupted containers may be resumed with `docker start -a <existing-container>`;
+completed packages and verified source caches are retained. Host pacman/AUR packages
+are not installed or updated by this workflow.

@@ -1,0 +1,24 @@
+# HomeTTY bundled official registry. GPL-3.0-only.
+[catalog]
+format = 1
+
+[[plugins]]
+id = "clock_tools"
+name = "Calendar"
+version = "1.0.0"
+url = "asset:/plugins/clock_tools.toml"
+sha256 = "6633aaa6bd8e4fe978c22830e5d06ce05f91e9e6a13d467a2e565e2add54856f"
+
+[[plugins]]
+id = "night"
+name = "Night"
+version = "1.0.0"
+url = "asset:/plugins/night.toml"
+sha256 = "f7aa38a90caac580bfab7497ba759723d492b60b666b555609bf2cf4d87316f4"
+
+[[plugins]]
+id = "wifi"
+name = "Wi-Fi settings"
+version = "1.0.0"
+url = "asset:/plugins/wifi.toml"
+sha256 = "a1d5cd0bbbbc842b51aa81bc60b137c97ede254bd94303aa4061c19981cb0fce"

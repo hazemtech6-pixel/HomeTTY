@@ -11,6 +11,7 @@ final class LauncherState {
     LauncherState() throws IOException {
         if (file.getBaseFile().exists()) try (InputStream in = file.openRead()) { values.load(in); }
     }
+    java.util.Set<String> keys() { return new java.util.HashSet<>(values.stringPropertyNames()); }
     String get(String key, String fallback) { return values.getProperty(key, fallback); }
     boolean pinned(String id) { return Boolean.parseBoolean(get("pin." + id, "false")); }
     int uses(String id) { try { return Integer.parseInt(get("uses." + id, "0")); } catch (NumberFormatException e) { return 0; } }

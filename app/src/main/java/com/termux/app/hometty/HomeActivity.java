@@ -24,7 +24,9 @@ public final class HomeActivity extends Activity {
     private EditText configurationEditor;
     private String configurationBaseline;
     private LauncherState state;
-    private final java.util.concurrent.ExecutorService indexWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private List<LocalPlugin> activePlugins=Collections.emptyList();
+    private LocalPlugin activeTheme;
+    private final java.util.concurrent.ExecutorService indexWorker = java.util.concurrent.Executors.newFixedThreadPool(2);
     private List<SearchIndex.Entry> localIndex = Collections.emptyList();
     private long indexedAt;
     private final List<OllamaClient.Message> aiHistory=new ArrayList<>();
@@ -38,9 +40,10 @@ public final class HomeActivity extends Activity {
     private String selected = "Home";
     private AppWidgetHost widgets;
     private int pendingWidget = -1;
+    private String pendingIcon;
     private Runnable afterAuthentication;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17;
+    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17, PICK_ICON = 18;
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) { if ("Apps".equals(selected) || "Home".equals(selected)) show(selected); }
     };
@@ -48,7 +51,7 @@ public final class HomeActivity extends Activity {
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-        if (saved != null) { selected = saved.getString("tab", "Home"); pendingWidget = saved.getInt("widget", -1); }
+        if (saved != null) { selected = saved.getString("tab", "Home"); pendingWidget = saved.getInt("widget", -1); pendingIcon=saved.getString("icon"); }
         try { config = new HomeConfig(); loadedConfiguration = HomeConfig.read(); state = new LauncherState(); }
         catch (Exception e) { configurationError(e); return; }
         widgets = new AppWidgetHost(this, 1024);
@@ -93,25 +96,36 @@ public final class HomeActivity extends Activity {
     @Override protected void onStart() { super.onStart(); if (widgets != null) widgets.startListening(); }
     @Override protected void onStop() { ActivityLock.stop(this); cancelAi(); if (widgets != null) widgets.stopListening(); super.onStop(); }
     @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); indexWorker.shutdownNow(); if (aiWorker!=null) aiWorker.shutdownNow(); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
-    @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); }
+    @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); out.putString("icon",pendingIcon); }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if (config != null) show("Home"); }
     @Override public void onBackPressed() { if (config != null) show("Home"); }
     private void build() {
-        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(16,16,16,8); root.setBackgroundColor(0xcc101418); setContentView(root);
+        activePlugins=LocalPlugin.list(); activeTheme=null;
+        String theme=config.string("theme.plugin","");
+        for (LocalPlugin plugin:activePlugins) if ("theme".equals(plugin.manifest.surface) && plugin.manifest.id.equals(theme) && plugin.granted(state)) activeTheme=plugin;
+        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(16,16,16,8); root.setBackgroundColor(themeColor("background",0xcc101418)); setContentView(root);
         HorizontalScrollView navigation = new HorizontalScrollView(this); navigation.setHorizontalScrollBarEnabled(false);
         tabs = new LinearLayout(this); navigation.addView(tabs); root.addView(navigation);
         for (String name : new String[]{"Home", "Apps", "Terminal", "Tools", "Desktop", "Settings"}) tab(name);
         if (config.flag("ai.enabled", false)) tab("AI");
+        for (LocalPlugin plugin:activePlugins) if ("tab".equals(plugin.manifest.surface) && plugin.granted(state)) {
+            Button button=new Button(this); button.setText(plugin.manifest.name); styleButton(button); tabs.addView(button); button.setOnClickListener(v -> show("plugin:"+plugin.manifest.id));
+        }
         ScrollView scroll = new ScrollView(this); content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); scroll.addView(content); root.addView(scroll, new LinearLayout.LayoutParams(-1,0,1));
         show(selected);
     }
-    private void tab(String name) { Button b = new Button(this); b.setText(name); tabs.addView(b); b.setOnClickListener(v -> {
+    private void tab(String name) { Button b = new Button(this); b.setText(name); styleButton(b); tabs.addView(b); b.setOnClickListener(v -> {
         if ("Terminal".equals(name)) { terminal(false); return; }
         if ("Settings".equals(name)) { show(name); ActivityLock.resume(this,"security.lock_settings"); } else show(name);
     }); }
+    private int themeColor(String name,int fallback) {
+        if (activeTheme==null || !activeTheme.granted(state)) return fallback;
+        String value=activeTheme.manifest.colors.get(name); return value==null?fallback:Color.parseColor(value);
+    }
+    private void styleButton(Button button) { if (activeTheme!=null && activeTheme.granted(state)) { button.setTextColor(themeColor("foreground",Color.WHITE)); button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(themeColor("accent",0xff354552))); } }
     private int dp(int size) { return Math.round(size*getResources().getDisplayMetrics().density); }
-    private TextView text(String value, int size) { TextView view = new TextView(this); view.setText(value); view.setTextColor(Color.WHITE); view.setTextSize(size); view.setPadding(8,12,8,12); content.addView(view); return view; }
-    private Button action(String label, Runnable runnable) { Button view = new Button(this); view.setText(label); content.addView(view); view.setOnClickListener(v -> runnable.run()); return view; }
+    private TextView text(String value, int size) { TextView view = new TextView(this); view.setText(value); view.setTextColor(themeColor("foreground",Color.WHITE)); view.setTextSize(size); view.setPadding(8,12,8,12); content.addView(view); return view; }
+    private Button action(String label, Runnable runnable) { Button view = new Button(this); view.setText(label); styleButton(view); content.addView(view); view.setOnClickListener(v -> runnable.run()); return view; }
     private void show(String name) {
         if (!"AI".equals(name) || "AI".equals(selected)) cancelAi();
         selected = name; configurationEditor = null; configurationBaseline = null; content.removeAllViews();
@@ -122,12 +136,12 @@ public final class HomeActivity extends Activity {
             case "Settings": settings(); break;
             case "Desktop": desktop(); break;
             case "AI": if (config.flag("ai.enabled", false)) ai(); else show("Home"); break;
-            default: show("Home");
+            default: if (name.startsWith("plugin:")) pluginTab(name.substring(7)); else show("Home");
         }
     }
     private void home() {
         if (config.flag("home.clock", true)) {
-            TextClock clock = new TextClock(this); clock.setTextSize(42); clock.setTextColor(Color.WHITE); clock.setFormat12Hour("h:mm a"); clock.setFormat24Hour("HH:mm"); content.addView(clock);
+            TextClock clock = new TextClock(this); clock.setTextSize(42); clock.setTextColor(themeColor("foreground",Color.WHITE)); clock.setFormat12Hour("h:mm a"); clock.setFormat24Hour("HH:mm"); content.addView(clock);
             clock.setOnClickListener(v -> open(new Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)));
         }
         text(java.text.DateFormat.getDateInstance(java.text.DateFormat.FULL).format(new Date()), 16);
@@ -148,6 +162,7 @@ public final class HomeActivity extends Activity {
             view.updateAppWidgetSize(null, 240, height, 400, height);
             Button remove = action("Remove " + info.loadLabel(getPackageManager()), () -> confirm("Remove widget?", () -> { widgets.deleteAppWidgetId(id); ArrayList<Integer> ids = widgetIds(); ids.remove(Integer.valueOf(id)); saveWidgets(ids); show("Home"); }));
         }
+        for (LocalPlugin plugin:activePlugins) if ("widget".equals(plugin.manifest.surface) && plugin.granted(state)) action(plugin.manifest.text, () -> runPlugin(plugin));
         action("Add widget", this::pickWidget);
         action("Wallpaper", () -> open(new Intent(Intent.ACTION_SET_WALLPAPER)));
         action("Choose HomeTTY as Home", this::requestHome);
@@ -157,15 +172,16 @@ public final class HomeActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         List<ResolveInfo> result = getPackageManager().queryIntentActivities(intent,0);
         result.removeIf(item -> item.activityInfo.packageName.equals(getPackageName()));
-        result.sort((a,b) -> { String x = id(a), y = id(b); int pins = Boolean.compare(state.pinned(y),state.pinned(x)); if (pins != 0) return pins;
+        result.sort((a,b) -> { String x = id(a), y = id(b); int pins = Boolean.compare(isPinned(y),isPinned(x)); if (pins != 0) return pins;
             int usage = Integer.compare(state.uses(y),state.uses(x)); return usage != 0 ? usage : label(a).compareToIgnoreCase(label(b)); });
         return result;
     }
     private String id(ResolveInfo item) { return new ComponentName(item.activityInfo.packageName,item.activityInfo.name).flattenToString(); }
-    private String label(ResolveInfo item) { return state.get("label." + id(item),item.loadLabel(getPackageManager()).toString()); }
+    private String label(ResolveInfo item) { String value=config.stringPath(Arrays.asList("app_overrides",id(item),"label"),state.get("label."+id(item),item.loadLabel(getPackageManager()).toString())); return value.trim().isEmpty()?item.loadLabel(getPackageManager()).toString():value; }
+    private android.graphics.drawable.Drawable appIcon(ResolveInfo item) { android.graphics.drawable.Drawable custom=HomeIcons.load(this,config,id(item)); return custom==null?item.loadIcon(getPackageManager()):custom; }
     private void apps() { text("Apps",26); search(); }
     private void search() {
-        EditText query = new EditText(this); query.setSingleLine(true); query.setHint("Search · app: · shell: · desktop: · file: · web:"); query.setTextColor(Color.WHITE); content.addView(query);
+        EditText query = new EditText(this); query.setSingleLine(true); query.setHint("Search · app: · shell: · desktop: · file: · web:"); query.setTextColor(themeColor("foreground",Color.WHITE)); content.addView(query);
         LinearLayout results = new LinearLayout(this); results.setOrientation(LinearLayout.VERTICAL); content.addView(results);
         Runnable update = () -> searchResults(query.getText().toString().trim(), results);
         query.addTextChangedListener(new TextWatcher() { public void beforeTextChanged(CharSequence s,int start,int count,int after) {} public void onTextChanged(CharSequence s,int start,int before,int count) { update.run(); } public void afterTextChanged(Editable value) {} });
@@ -174,7 +190,7 @@ public final class HomeActivity extends Activity {
             indexing=true;
             indexWorker.execute(() -> {
                 List<SearchIndex.Entry> entries;
-                try { entries=SearchIndex.build(HomeConfig.HOME,new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH)); } catch (IOException error) { entries=Collections.emptyList(); }
+                try { entries=SearchIndex.build(HomeConfig.HOME,new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH)); } catch (IOException | RuntimeException error) { entries=Collections.emptyList(); }
                 final List<SearchIndex.Entry> indexed=entries;
                 runOnUiThread(() -> { indexing=false; if (isFinishing() || isDestroyed()) return; localIndex=indexed; indexedAt=System.currentTimeMillis(); if (query.isAttachedToWindow() && query.length()>0) update.run(); });
             });
@@ -189,41 +205,42 @@ public final class HomeActivity extends Activity {
         }
         if (value.startsWith("web:")) { resultAction(results,"Search the web", () -> open(new Intent(Intent.ACTION_VIEW,Uri.parse("https://www.google.com/search?q="+Uri.encode(value.substring(4)))))); return; }
         String kind="", term=value; int colon=value.indexOf(':');
-        if (colon>0 && Arrays.asList("app","desktop","file","command").contains(value.substring(0,colon))) { kind=value.substring(0,colon); term=value.substring(colon+1).trim(); }
+        if (colon>0 && Arrays.asList("app","desktop","file","command","plugin").contains(value.substring(0,colon))) { kind=value.substring(0,colon); term=value.substring(colon+1).trim(); }
         if ("Apps".equals(selected) && kind.isEmpty()) kind="app";
         final String category=kind, needle=term.toLowerCase(Locale.ROOT);
         List<SearchIndex.Entry> matches=new ArrayList<>(); Map<String,ResolveInfo> androidApps=new HashMap<>();
         if (category.isEmpty() || "app".equals(category)) for (ResolveInfo app:activities()) {
             if (label(app).toLowerCase(Locale.ROOT).contains(needle)) { SearchIndex.Entry entry=new SearchIndex.Entry("app",label(app),id(app),""); matches.add(entry); androidApps.put(entry.target,app); }
         }
-        if (!value.isEmpty()) for (SearchIndex.Entry entry:localIndex) if ((category.isEmpty() || category.equals(entry.kind)) && entry.title.toLowerCase(Locale.ROOT).contains(needle)) matches.add(entry);
-        matches.sort((a,b) -> { String x="app".equals(a.kind)?a.target:a.id(), y="app".equals(b.kind)?b.target:b.id(); int pins=Boolean.compare(state.pinned(y),state.pinned(x)); if (pins!=0) return pins; int uses=Integer.compare(state.uses(y),state.uses(x)); return uses!=0?uses:a.title.compareToIgnoreCase(b.title); });
+        if (!value.isEmpty()) for (SearchIndex.Entry entry:localIndex) if ((category.isEmpty() || (category.equals(entry.kind) || "command".equals(category) && "plugin".equals(entry.kind))) && entry.title.toLowerCase(Locale.ROOT).contains(needle)) matches.add(entry);
+        matches.sort((a,b) -> { String x="app".equals(a.kind)?a.target:a.id(), y="app".equals(b.kind)?b.target:b.id(); int pins=Boolean.compare(isPinned(y),isPinned(x)); if (pins!=0) return pins; int uses=Integer.compare(state.uses(y),state.uses(x)); return uses!=0?uses:a.title.compareToIgnoreCase(b.title); });
         int count=0;
         for (SearchIndex.Entry entry:matches) {
             if (++count>100) break;
             Button button=new Button(this); button.setText(entry.title+" · "+entry.kind); results.addView(button);
             ResolveInfo app=androidApps.get(entry.target);
-            if (app!=null) { android.graphics.drawable.Drawable icon=app.loadIcon(getPackageManager()); icon.setBounds(0,0,dp(32),dp(32)); button.setCompoundDrawables(icon,null,null,null); }
+            if (app!=null) { android.graphics.drawable.Drawable icon=appIcon(app); icon.setBounds(0,0,dp(32),dp(32)); button.setCompoundDrawables(icon,null,null,null); }
             String key="app".equals(entry.kind)?entry.target:entry.id();
             button.setOnClickListener(v -> {
                 Runnable used=() -> put("uses."+key,Integer.toString(Math.min(Integer.MAX_VALUE-1,state.uses(key))+1));
                 if ("app".equals(entry.kind)) authenticate("security.lock_apps", () -> { if (open(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName.unflattenFromString(entry.target)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))) used.run(); });
+                else if ("plugin".equals(entry.kind)) { try { runPlugin(new LocalPlugin(new File(entry.target))); used.run(); } catch (Exception error) { toast(error.getMessage()); } }
                 else if ("file".equals(entry.kind)) { File file=new File(entry.target); files(file.isDirectory()?file:file.getParentFile()); used.run(); }
                 else authenticate("desktop".equals(entry.kind)?"security.lock_desktop":"security.lock_terminal", () -> confirm("Launch "+entry.title+"?\n"+entry.command, () -> { ShellCommands.run(this,entry.command); used.run(); }));
             });
-            button.setOnLongClickListener(v -> { if (app!=null) appMenu(app); else confirm(state.pinned(key)?"Unpin "+entry.title+"?":"Pin "+entry.title+"?", () -> { put("pin."+key,Boolean.toString(!state.pinned(key))); searchResults(value,results); }); return true; });
+            button.setOnLongClickListener(v -> { if (app!=null) appMenu(app); else confirm(isPinned(key)?"Unpin "+entry.title+"?":"Pin "+entry.title+"?", () -> { togglePin(key); searchResults(value,results); }); return true; });
         }
     }
-    private void resultAction(LinearLayout container, String title, Runnable run) { Button b = new Button(this); b.setText(title); container.addView(b); b.setOnClickListener(v -> run.run()); }
+    private void resultAction(LinearLayout container, String title, Runnable run) { Button b = new Button(this); b.setText(title); styleButton(b); container.addView(b); b.setOnClickListener(v -> run.run()); }
     private void renderApps(String query, boolean pinnedOnly, LinearLayout target) {
         LinearLayout row = null; int index = 0;
         for (ResolveInfo item : activities()) {
-            if (pinnedOnly && !state.pinned(id(item))) continue;
+            if (pinnedOnly && !isPinned(id(item))) continue;
             if (!label(item).toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT))) continue;
             if (index++ % config.columns() == 0) { row = new LinearLayout(this); target.addView(row); }
             LinearLayout tile = new LinearLayout(this); tile.setGravity(Gravity.CENTER); tile.setOrientation(LinearLayout.VERTICAL); tile.setPadding(8,12,8,12); row.addView(tile,new LinearLayout.LayoutParams(0,-2,1));
-            ImageView icon = new ImageView(this); icon.setImageDrawable(item.loadIcon(getPackageManager())); tile.addView(icon,new LinearLayout.LayoutParams(dp(48),dp(48)));
-            TextView label = new TextView(this); label.setText(label(item)); label.setTextColor(Color.WHITE); label.setGravity(Gravity.CENTER); label.setMaxLines(2); tile.addView(label);
+            ImageView icon = new ImageView(this); icon.setImageDrawable(appIcon(item)); tile.addView(icon,new LinearLayout.LayoutParams(dp(48),dp(48)));
+            TextView label = new TextView(this); label.setText(label(item)); label.setTextColor(themeColor("foreground",Color.WHITE)); label.setGravity(Gravity.CENTER); label.setMaxLines(2); tile.addView(label);
             tile.setContentDescription(label(item)); tile.setFocusable(true); tile.setOnClickListener(v -> authenticate("security.lock_apps", () -> {
                 Intent launch = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName.unflattenFromString(id(item))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                 if (open(launch)) put("uses." + id(item), Integer.toString(Math.min(Integer.MAX_VALUE-1,state.uses(id(item)))+1));
@@ -231,14 +248,33 @@ public final class HomeActivity extends Activity {
             tile.setOnLongClickListener(v -> { appMenu(item); return true; });
         }
     }
+    private boolean isPinned(String id) { return config.has("home.pins") ? config.strings("home.pins").contains(id) : state.pinned(id); }
+    private void togglePin(String id) {
+        try {
+            String baseline=HomeConfig.read(); HomeConfig latest=new HomeConfig();
+            Set<String> pins=new LinkedHashSet<>(latest.strings("home.pins"));
+            if (!latest.has("home.pins")) for (String key:state.keys()) if (key.startsWith("pin.") && state.pinned(key.substring(4))) pins.add(key.substring(4));
+            if (!pins.remove(id)) pins.add(id);
+            String updated=ConfigEdits.scalar(baseline,"home.pins",new ArrayList<>(pins));
+            if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed; retry pinning");
+            HomeConfig.save(updated); config=new HomeConfig(); loadedConfiguration=updated;
+        } catch (Exception error) { toast("Could not save pins: "+error.getMessage()); }
+    }
     private void appMenu(ResolveInfo item) {
-        new AlertDialog.Builder(this).setTitle(label(item)).setItems(new String[]{state.pinned(id(item)) ? "Unpin" : "Pin", "Rename", "App info", "Uninstall", "Shortcuts"},(dialog,which) -> {
-            if (which == 0) { put("pin." + id(item),Boolean.toString(!state.pinned(id(item)))); show(selected); }
-            if (which == 1) { EditText name = new EditText(this); name.setText(label(item)); new AlertDialog.Builder(this).setTitle("App label").setView(name).setPositiveButton("Save",(d,w) -> { put("label." + id(item), name.getText().toString()); show(selected); }).setNegativeButton("Cancel",null).show(); }
+        new AlertDialog.Builder(this).setTitle(label(item)).setItems(new String[]{isPinned(id(item)) ? "Unpin" : "Pin", "Rename", "App info", "Uninstall", "Shortcuts", "Choose icon", "Reset icon"},(dialog,which) -> {
+            if (which == 0) { togglePin(id(item)); show(selected); }
+            if (which == 1) fileName("App label",label(item),name -> { if (name.trim().isEmpty() || name.length()>256) throw new IOException("Use a label of 1–256 characters"); saveAppOverride(id(item),"label",name); });
             if (which == 2) open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:" + item.activityInfo.packageName)));
             if (which == 3) confirm("Uninstall " + label(item) + "?", () -> open(new Intent(Intent.ACTION_DELETE,Uri.parse("package:" + item.activityInfo.packageName))));
             if (which == 4) shortcuts(item);
+            if (which == 5) { pendingIcon=id(item); openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),PICK_ICON); }
+            if (which == 6) { try { saveAppOverride(id(item),"icon",""); } catch (Exception error) { toast(error.getMessage()); } }
         }).show();
+    }
+    private void saveAppOverride(String component,String field,String value) throws IOException {
+        String baseline=HomeConfig.read(),updated=ConfigEdits.scalar(baseline,Arrays.asList("app_overrides",component,field),value);
+        if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed; retry the override");
+        HomeConfig.save(updated); loadedConfiguration=updated; config=new HomeConfig(); build();
     }
     private void shortcuts(ResolveInfo item) {
         if (Build.VERSION.SDK_INT < 25) { toast("Shortcuts require Android 7.1"); return; }
@@ -391,7 +427,7 @@ public final class HomeActivity extends Activity {
     }
     private void settings() {
         text("Settings",26); text("~/.config/hometty/config.toml",14);
-        EditText editor = new EditText(this); editor.setTextColor(Color.WHITE); editor.setTypeface(android.graphics.Typeface.MONOSPACE); editor.setGravity(Gravity.TOP);
+        EditText editor = new EditText(this); editor.setTextColor(themeColor("foreground",Color.WHITE)); editor.setTypeface(android.graphics.Typeface.MONOSPACE); editor.setGravity(Gravity.TOP);
         final String baseline;
         try { baseline = HomeConfig.read(); editor.setText(baseline); } catch (IOException e) { toast(e.getMessage()); return; }
         configurationEditor = editor; configurationBaseline = baseline;
@@ -441,33 +477,115 @@ public final class HomeActivity extends Activity {
         view.setOnClickListener(v -> open(new Intent(Intent.ACTION_VIEW,Uri.parse("https://open-meteo.com/"))));
         new Thread(() -> {
             String result;
-            try { result=new WeatherProvider.OpenMeteo().current(lat,lon); } catch (Exception e) { result="Weather unavailable: "+e.getMessage(); }
-            final String message=result; runOnUiThread(() -> { if (!isDestroyed()) view.setText(message); });
+            try { result=WeatherCache.current(new WeatherProvider.OpenMeteo(),HomeConfig.CACHE,lat,lon,System.currentTimeMillis()); } catch (Exception e) { result="Weather unavailable: "+e.getMessage(); }
+            final String message=result; runOnUiThread(() -> { if (!isDestroyed() && view.isAttachedToWindow()) view.setText(message); });
         },"HomeTTY-weather").start();
     }
     private void plugins() {
-        content.removeAllViews(); text("Plugins",26);
+        content.removeAllViews(); activePlugins=LocalPlugin.list(); text("Plugins",26);
+        action("Official registry (bundled)", () -> browseCatalog("asset:/plugins/catalog.toml"));
         action("Import local TOML plugin", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),IMPORT_PLUGIN));
-        action("Register catalog source", () -> { EditText input=new EditText(this); input.setHint("https://…"); new AlertDialog.Builder(this).setTitle("Register source — does not install or run code").setView(input).setNegativeButton("Cancel",null).setPositiveButton("Register",(d,w)-> { try { java.net.URI uri=java.net.URI.create(input.getText().toString()); if (!"https".equals(uri.getScheme()) || uri.getHost()==null || uri.getUserInfo()!=null) throw new IllegalArgumentException("Use an HTTPS catalog URL without credentials"); put("source."+PluginManifest.digest(uri.toString()),uri.toString()); toast("Source registered. No code installed or executed."); } catch (Exception e) { toast(e.getMessage()); } }).show(); });
-        File directory=new File(HomeConfig.HOME,".config/hometty/plugins"); File[] entries=directory.listFiles((dir,name)->name.endsWith(".toml"));
-        if (entries==null) return;
-        for (File entry:entries) {
-            try {
-                if (entry.length()>262144) throw new IOException("Plugin manifest too large");
-                String source=BoundedFiles.read(entry,262144);
-                PluginManifest plugin=new PluginManifest(source); String digest=PluginManifest.digest(source);
-                boolean granted=state.get("grant."+plugin.id,"").equals(digest);
-                action(plugin.name+(granted ? " · Run" : " · Review capabilities"), () -> {
-                    if (!granted) { confirm(plugin.name+" requests: "+plugin.capabilities+". Shell access can read and change all files accessible to HomeTTY. Grant these capabilities for this exact manifest?", () -> { put("grant."+plugin.id,digest); plugins(); }); return; }
-                    // Re-read before execution so edits cannot inherit a previously reviewed grant.
-                    try { if (!digest.equals(PluginManifest.digest(BoundedFiles.read(entry,262144)))) { toast("Plugin changed; review its capabilities again"); plugins(); return; } } catch (IOException e) { toast(e.getMessage()); return; }
-                    if ("web".equals(plugin.kind)) open(new Intent(Intent.ACTION_VIEW,Uri.parse(plugin.target)));
-                    if ("app".equals(plugin.kind)) authenticate("security.lock_apps", () -> { Intent launch=getPackageManager().getLaunchIntentForPackage(plugin.target); if (launch!=null) open(launch); else toast("Application is not installed"); });
-                    if ("shell".equals(plugin.kind)) authenticate("security.lock_terminal", () -> confirm("Run plugin command?\n"+plugin.target, () -> ShellCommands.run(this,plugin.target)));
-                });
-                if (granted) action("Revoke "+plugin.name, () -> { put("grant."+plugin.id,""); plugins(); });
-            } catch (Exception e) { text(entry.getName()+": "+e.getMessage(),14); }
+        action("Register catalog source", () -> fileName("HTTPS catalog URL", "https://", address -> {
+            String baseline=HomeConfig.read(), updated=PluginSources.register(baseline,address.trim());
+            if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed; retry registration");
+            HomeConfig.save(updated); loadedConfiguration=updated; config=new HomeConfig(); toast("Source registered. No plugin was downloaded or executed."); plugins();
+        }));
+        try {
+            // Migrate registrations made by earlier development builds into human TOML.
+            String baseline=HomeConfig.read(), updated=baseline;
+            for (String key:state.keys()) if (key.startsWith("source.") && !state.get(key,"").isEmpty()) updated=PluginSources.register(updated,state.get(key,""));
+            if (!updated.equals(baseline)) { if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed"); HomeConfig.save(updated); loadedConfiguration=updated; config=new HomeConfig(); }
+            for (String key:state.keys()) if (key.startsWith("source.") && !state.get(key,"").isEmpty()) put(key,"");
+            for (PluginSources.Source source:PluginSources.parse(HomeConfig.parse(updated))) action("Browse "+source.name, () -> browseCatalog(source.url));
+        } catch (Exception error) { text("Catalog registrations: "+error.getMessage(),14); }
+        for (LocalPlugin plugin:activePlugins) {
+            boolean granted=plugin.granted(state);
+            action(plugin.manifest.name+" · "+plugin.manifest.version+" · "+plugin.manifest.surface+(granted?" · Run / apply":" · Review"), () -> runPlugin(plugin));
+            if (granted) action("Revoke "+plugin.manifest.name, () -> { put("grant."+plugin.manifest.id,""); indexedAt=0; build(); plugins(); });
+            action("Remove "+plugin.manifest.name, () -> confirm("Remove this plugin manifest and revoke its grants?", () -> { try { HomeFiles.delete(HomeConfig.HOME,plugin.file); put("grant."+plugin.manifest.id,""); indexedAt=0; build(); plugins(); } catch (IOException error) { toast(error.getMessage()); } }));
         }
+        if (activeTheme!=null) action("Use default theme", () -> authenticate("security.lock_settings", () -> setScalar("theme.plugin","")));
+    }
+    private void setScalar(String key,Object value) {
+        try { String baseline=HomeConfig.read(), updated=ConfigEdits.scalar(baseline,key,value); if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed; retry the edit"); HomeConfig.save(updated); loadedConfiguration=updated; config=new HomeConfig(); build(); }
+        catch (Exception error) { toast(error.getMessage()); }
+    }
+    private void pluginTab(String id) {
+        for (LocalPlugin plugin:activePlugins) if (plugin.manifest.id.equals(id) && "tab".equals(plugin.manifest.surface) && plugin.granted(state)) {
+            try { LocalPlugin current=new LocalPlugin(plugin.file); if (!current.digest.equals(plugin.digest)) throw new IOException("Plugin changed; review its capabilities again"); text(plugin.manifest.name,26); text(plugin.manifest.text,16); action("Run action", () -> runPlugin(plugin)); return; }
+            catch (Exception error) { toast(error.getMessage()); break; }
+        }
+        show("Home");
+    }
+    private void runPlugin(LocalPlugin snapshot) {
+        final LocalPlugin plugin;
+        try { plugin=new LocalPlugin(snapshot.file); } catch (Exception error) { toast(error.getMessage()); return; }
+        if (!plugin.granted(state)) {
+            confirm(plugin.manifest.name+" requests "+plugin.manifest.capabilities+" for its "+plugin.manifest.surface+" surface. Shell access can read or change files accessible to HomeTTY. Grant for this exact manifest?", () -> {
+                try { if (!new LocalPlugin(plugin.file).digest.equals(plugin.digest)) throw new IOException("Plugin changed during review"); put("grant."+plugin.manifest.id,plugin.digest); indexedAt=0; build(); plugins(); }
+                catch (Exception error) { toast(error.getMessage()); }
+            }); return;
+        }
+        Runnable execute=() -> {
+            try {
+                LocalPlugin current=new LocalPlugin(plugin.file); if (!current.digest.equals(plugin.digest) || !current.granted(state)) throw new IOException("Plugin changed or its capabilities were revoked");
+                PluginManifest manifest=current.manifest;
+                if ("web".equals(manifest.kind)) open(new Intent(Intent.ACTION_VIEW,Uri.parse(manifest.target)));
+                else if ("app".equals(manifest.kind)) { Intent launch=getPackageManager().getLaunchIntentForPackage(manifest.target); if (launch!=null) open(launch); else toast("Application is not installed"); }
+                else if ("shell".equals(manifest.kind)) ShellCommands.run(this,manifest.target);
+                else if ("settings".equals(manifest.kind)) {
+                    Intent intent;
+                    switch (manifest.target) { case "wifi": intent=new Intent(Settings.ACTION_WIFI_SETTINGS); break; case "bluetooth": intent=new Intent(Settings.ACTION_BLUETOOTH_SETTINGS); break; case "calendar": intent=new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR); break; case "calculator": intent=new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALCULATOR); break; default: intent=new Intent(Settings.ACTION_SETTINGS); }
+                    open(intent);
+                } else if ("theme".equals(manifest.kind)) setScalar("theme.plugin",manifest.id);
+            } catch (Exception error) { toast(error.getMessage()); }
+        };
+        if ("shell".equals(plugin.manifest.kind)) authenticate("security.lock_terminal", () -> confirm("Run plugin command?\n"+plugin.manifest.target,execute));
+        else if ("app".equals(plugin.manifest.kind)) authenticate("security.lock_apps",execute);
+        else if ("theme".equals(plugin.manifest.kind)) authenticate("security.lock_settings",execute);
+        else execute.run();
+    }
+    private String pluginAsset(String address) throws IOException {
+        if (!address.matches("asset:/plugins/[a-z0-9_-]+\\.toml")) throw new IOException("Invalid bundled plugin path");
+        try (InputStream input=getAssets().open(address.substring(7)); ByteArrayOutputStream bytes=new ByteArrayOutputStream()) { byte[] buffer=new byte[4096]; int count; while ((count=input.read(buffer))!=-1) { if (bytes.size()+count>262144) throw new IOException("Bundled manifest too large"); bytes.write(buffer,0,count); } return bytes.toString("UTF-8"); }
+    }
+    private void browseCatalog(String address) {
+        content.removeAllViews(); text("Plugin catalog",26); text(address,14); action("Plugins",this::plugins);
+        TextView status=text("Loading catalog…",14); LinearLayout entries=new LinearLayout(this); entries.setOrientation(LinearLayout.VERTICAL); content.addView(entries);
+        indexWorker.execute(() -> {
+            PluginCatalog catalog=null; String failure=null;
+            try { boolean bundled=address.startsWith("asset:"); catalog=new PluginCatalog(bundled?pluginAsset(address):PluginNetwork.fetch(address),bundled); }
+            catch (Exception error) { failure=error.getMessage(); }
+            final PluginCatalog loaded=catalog; final String message=failure;
+            runOnUiThread(() -> {
+                if (isDestroyed() || isFinishing() || !entries.isAttachedToWindow()) return;
+                if (message!=null) { status.setText("Catalog unavailable: "+message); return; }
+                status.setText("Choose a manifest to review. Downloading and importing do not grant capabilities.");
+                for (PluginCatalog.Entry entry:loaded.entries) {
+                    LocalPlugin installed=null; for (LocalPlugin plugin:LocalPlugin.list()) if (plugin.manifest.id.equals(entry.id)) installed=plugin;
+                    String label=entry.name+" · "+entry.version+(installed==null?" · Review install":installed.digest.equals(entry.sha256)?" · Installed":" · Review update");
+                    resultAction(entries,label, () -> reviewCatalogEntry(entry,entries,status));
+                }
+            });
+        });
+    }
+    private void reviewCatalogEntry(PluginCatalog.Entry entry,LinearLayout entries,TextView status) {
+        status.setText("Downloading manifest for review…");
+        indexWorker.execute(() -> {
+            String source=null,failure=null; PluginManifest manifest=null;
+            try { source=entry.url.startsWith("asset:")?pluginAsset(entry.url):PluginNetwork.fetch(entry.url); manifest=entry.verify(source); }
+            catch (Exception error) { failure=error.getMessage(); }
+            final String downloaded=source,message=failure; final PluginManifest plugin=manifest;
+            runOnUiThread(() -> { if (isDestroyed() || isFinishing() || !entries.isAttachedToWindow()) return; if (message!=null) { status.setText("Manifest rejected: "+message); return; } confirm("Import "+plugin.name+" "+plugin.version+"? Requested capabilities: "+plugin.capabilities+". Existing content will be replaced; changed content loses grants. Nothing runs during import.", () -> importPlugin(downloaded)); });
+        });
+    }
+    private void importPlugin(String source) {
+        try {
+            PluginManifest manifest=new PluginManifest(source); File directory=new File(HomeConfig.HOME,".config/hometty/plugins"); if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("Cannot create plugin directory");
+            android.util.AtomicFile file=new android.util.AtomicFile(HomeFiles.child(HomeConfig.HOME,directory,manifest.id+".toml")); FileOutputStream output=file.startWrite();
+            try { output.write(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)); file.finishWrite(output); } catch (IOException error) { file.failWrite(output); throw error; }
+            indexedAt=0; build(); plugins();
+        } catch (Exception error) { toast(error.getMessage()); }
     }
     private void desktop() {
         text("Desktop",26);
@@ -502,7 +620,7 @@ public final class HomeActivity extends Activity {
         text("Ollama · "+endpoint.base+" · "+model,14);
         text("Messages go to this server. Responses do not run commands. Conversation history stays in memory.",14);
         TextView transcript=text(aiTranscript(),16); transcript.setTextIsSelectable(true);
-        EditText input=new EditText(this); input.setHint("Message"); input.setTextColor(Color.WHITE); input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(16384)}); input.setText(aiDraft); content.addView(input);
+        EditText input=new EditText(this); input.setHint("Message"); input.setTextColor(themeColor("foreground",Color.WHITE)); input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(16384)}); input.setText(aiDraft); content.addView(input);
         input.addTextChangedListener(new TextWatcher() { public void beforeTextChanged(CharSequence s,int a,int c,int n) {} public void onTextChanged(CharSequence s,int a,int b,int c) { aiDraft=s.toString(); } public void afterTextChanged(Editable e) {} });
         TextView status=text("",14);
         action("Send", () -> {
@@ -565,6 +683,22 @@ public final class HomeActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
         if (ActivityLock.result(this,request,result)) return;
+        if (request==PICK_ICON) {
+            String component=pendingIcon; pendingIcon=null;
+            if (result==RESULT_OK && component!=null && data!=null && data.getData()!=null) {
+                Uri uri=data.getData(); toast("Importing icon…");
+                indexWorker.execute(() -> {
+                    String icon=null,failure=null;
+                    try (InputStream input=getContentResolver().openInputStream(uri); ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+                        if (input==null) throw new IOException("Cannot read selected image"); byte[] buffer=new byte[8192]; int count;
+                        while ((count=input.read(buffer))!=-1) { if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Icon import canceled"); if (bytes.size()+count>1048576) throw new IOException("Icon image exceeds 1 MiB"); bytes.write(buffer,0,count); }
+                        icon=HomeIcons.store(bytes.toByteArray());
+                    } catch (Exception error) { failure=error.getMessage(); }
+                    final String stored=icon,message=failure;
+                    runOnUiThread(() -> { if (isFinishing() || isDestroyed()) return; if (message!=null) toast(message); else try { saveAppOverride(component,"icon",stored); } catch (Exception error) { toast(error.getMessage()); } });
+                });
+            } return;
+        }
         if (request==REQUEST_HOME) {
             if (Build.VERSION.SDK_INT>=29 && getSystemService(RoleManager.class).isRoleHeld(RoleManager.ROLE_HOME)) toast("HomeTTY is your default Home");
             return;
@@ -576,7 +710,7 @@ public final class HomeActivity extends Activity {
                     String source;
                     try (InputStream in=getContentResolver().openInputStream(data.getData()); ByteArrayOutputStream out=new ByteArrayOutputStream()) { if (in==null) throw new IOException("Cannot open source"); byte[] b=new byte[4096]; int n; while ((n=in.read(b))!=-1) { if (out.size()+n>262144) throw new IOException("File too large"); out.write(b,0,n); } source=out.toString("UTF-8"); }
                     if (request==RESTORE) { HomeConfig.parse(source); confirm("Replace your configuration with this validated backup?", () -> { try { HomeConfig.save(source); config=new HomeConfig(); selected="Home"; build(); } catch (Exception e) { toast(e.getMessage()); } }); }
-                    else { PluginManifest manifest=new PluginManifest(source); confirm("Import "+manifest.name+"? Capabilities are granted separately before it can run.", () -> { try { File directory=new File(HomeConfig.HOME,".config/hometty/plugins"); directory.mkdirs(); android.util.AtomicFile file=new android.util.AtomicFile(new File(directory,manifest.id+".toml")); FileOutputStream out=file.startWrite(); try { out.write(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)); file.finishWrite(out); } catch (IOException e) { file.failWrite(out); throw e; } plugins(); } catch (Exception e) { toast(e.getMessage()); } }); }
+                    else { PluginManifest manifest=new PluginManifest(source); confirm("Import "+manifest.name+"? Capabilities are granted separately before it can run.", () -> { importPlugin(source); }); }
                 }
             } catch (Exception e) { toast(e.getMessage()); }
             return;

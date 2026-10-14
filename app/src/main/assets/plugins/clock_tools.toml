@@ -1,0 +1,12 @@
+# HomeTTY official declarative widget. GPL-3.0-only.
+[plugin]
+id = "clock_tools"
+name = "Calendar"
+version = "1.0.0"
+surface = "widget"
+capabilities = ["widget", "android_settings"]
+[view]
+text = "Open calendar"
+[action]
+kind = "settings"
+target = "calendar"

@@ -47,10 +47,34 @@ public final class HomeConfig {
             if (lower.endsWith("api_key") || lower.endsWith("password") || lower.endsWith("secret") || lower.endsWith("token"))
                 throw new IllegalArgumentException("Secrets must be stored in Android Keystore, not TOML: " + key);
         }
+        if (result.contains("app_overrides")) {
+            if (!(result.get("app_overrides") instanceof org.tomlj.TomlTable)) throw new IllegalArgumentException("app_overrides must be a table");
+            org.tomlj.TomlTable overrides=result.getTable("app_overrides");
+            for (String component:overrides.keySet()) {
+                Object value=overrides.get(java.util.Collections.singletonList(component)); if (!(value instanceof org.tomlj.TomlTable)) throw new IllegalArgumentException("App overrides must be tables");
+                org.tomlj.TomlTable fields=(org.tomlj.TomlTable)value;
+                for (String key:new String[]{"label","icon"}) if (fields.contains(key) && !(fields.get(key) instanceof String)) throw new IllegalArgumentException("App "+key+" override must be text");
+            }
+        }
+        PluginSources.parse(result);
+        if (result.contains("home.pins")) {
+            if (!(result.get("home.pins") instanceof org.tomlj.TomlArray)) throw new IllegalArgumentException("home.pins must be an array of strings");
+            org.tomlj.TomlArray pins=result.getArray("home.pins");
+            if (pins.size()>4096) throw new IllegalArgumentException("home.pins must contain at most 4096 strings");
+            for (int index=0;index<pins.size();index++) if (!(pins.get(index) instanceof String) || pins.getString(index).length()>4096) throw new IllegalArgumentException("Pin identifiers must be strings of at most 4096 characters");
+        }
+        if (result.contains("theme.plugin") && !(result.get("theme.plugin") instanceof String)) throw new IllegalArgumentException("theme.plugin must be a plugin ID");
         return result;
     }
     public boolean flag(String key, boolean fallback) { Boolean value = values.getBoolean(key); return value == null ? fallback : value; }
+    public boolean has(String key) { return values.contains(key); }
+    public java.util.List<String> strings(String key) {
+        java.util.List<String> result=new java.util.ArrayList<>(); org.tomlj.TomlArray array=values.getArray(key);
+        if (array!=null) for (int index=0;index<array.size();index++) result.add(array.getString(index));
+        return result;
+    }
     public String string(String key,String fallback) { String value=values.getString(key); return value==null ? fallback : value; }
+    public String stringPath(java.util.List<String> path,String fallback) { String value=values.getString(path); return value==null?fallback:value; }
     public double number(String key,double fallback) { Object value=values.get(key); return value instanceof Number ? ((Number)value).doubleValue() : fallback; }
     public int columns() { Long value = values.getLong("home.columns"); return value == null ? 4 : value.intValue(); }
     public static String read() throws IOException {

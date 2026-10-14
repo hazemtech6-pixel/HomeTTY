@@ -1,0 +1,10 @@
+# HomeTTY official declarative plugin. GPL-3.0-only.
+[plugin]
+id = "wifi"
+name = "Wi-Fi settings"
+version = "1.0.0"
+surface = "tool"
+capabilities = ["android_settings"]
+[action]
+kind = "settings"
+target = "wifi"

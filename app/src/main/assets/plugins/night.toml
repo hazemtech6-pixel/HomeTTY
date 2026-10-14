@@ -1,0 +1,11 @@
+# HomeTTY official declarative theme. GPL-3.0-only.
+[plugin]
+id = "night"
+name = "Night"
+version = "1.0.0"
+surface = "theme"
+capabilities = ["theme"]
+[theme]
+background = "#cc101418"
+foreground = "#e5e9ef"
+accent = "#354552"

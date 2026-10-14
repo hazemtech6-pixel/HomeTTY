@@ -20,12 +20,22 @@ def prepare(root):
     if revision != REVISION:
         raise RuntimeError(f'Expected pinned package revision {REVISION}, got {revision}')
     properties = root / 'scripts/properties.sh'
+    # An interrupted configure leaves a directory without a usable interpreter.
+    # Resume the pinned source build rather than treating that directory as success.
+    host_python = root / 'scripts/build/setup/termux_setup_build_python.sh'
+    replace_once(host_python, 'if [[ ! -d "$_PYTHON_FOLDER" ]]; then',
+                 'if [[ ! -x "$_PYTHON_FOLDER/host-build-prefix/bin/python${TERMUX_PYTHON_VERSION}" ]]; then')
+    replace_once(host_python, 'mkdir "$_PYTHON_FOLDER"', 'mkdir -p "$_PYTHON_FOLDER"')
+    replace_once(host_python, 'mkdir host-build/', 'mkdir -p host-build/')
     replace_once(properties, 'TERMUX__NAME="Termux"', 'TERMUX__NAME="HomeTTY"')
     replace_once(properties, 'TERMUX_APP__PACKAGE_NAME="com.termux"', f'TERMUX_APP__PACKAGE_NAME="{APPLICATION_ID}"')
     replace_once(properties, 'TERMUX_API_APP__PACKAGE_NAME="com.termux.api"', f'TERMUX_API_APP__PACKAGE_NAME="{APPLICATION_ID}.api"')
     for script, package in [('termux_step_create_debian_package.sh', '$TERMUX_PKG_NAME'), ('termux_create_debian_subpackages.sh', '$SUB_PKG_NAME')]:
         control = root / 'scripts/build' / script
         replace_once(control, f'Package: {package}\n', f'Package: {package}\n\t\tX-HomeTTY-Application-ID: {APPLICATION_ID}\n')
+    # Same upstream rxvt archive/checksum, mirrored by Debian when the origin is unavailable.
+    ncurses = root / 'packages/ncurses/build.sh'
+    replace_once(ncurses, 'https://dist.schmorp.de/rxvt-unicode/Attic/rxvt-unicode-${TERMUX_PKG_VERSION[1]}.tar.bz2', 'https://deb.debian.org/debian/pool/main/r/rxvt-unicode/rxvt-unicode_${TERMUX_PKG_VERSION[1]}.orig.tar.bz2')
     apt = root / 'packages/apt/build.sh'
     start = '\t\techo "# The main termux repository, with cloudflare cache"\n\t\techo "deb https://packages-cf.termux.dev/apt/termux-main/ stable main"\n\t\techo "# The main termux repository, without cloudflare cache"\n\t\techo "# deb https://packages.termux.dev/apt/termux-main/ stable main"'
     replace_once(apt, start, '\t\techo "# HomeTTY: only repositories rebuilt for this application prefix are compatible."\n\t\techo "# Configure a signed HomeTTY repository here; stock Termux repositories are disabled."')

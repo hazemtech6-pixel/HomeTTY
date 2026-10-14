@@ -95,5 +95,9 @@ continuation (including uncommitted companion integration at test time):
   and displayed a completed protocol response. Real server/model, credentials,
   redirects, cancellation and full frontend lifecycle still need checks.
 
+- Plugin widget instrumentation passed: absent without a grant, visible with an
+  exact-content grant, absent again after the manifest changed. Catalog import,
+  updates, tab/theme activation and full shell-lock handoff still need UI checks.
+
 The other checklist entries remain pending unless separately recorded. These
 results do not establish behavior on physical devices or with rebuilt packages.

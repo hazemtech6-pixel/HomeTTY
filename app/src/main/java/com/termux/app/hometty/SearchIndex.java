@@ -34,6 +34,12 @@ public final class SearchIndex {
         }
         File[] commands = new File(prefix, "bin").listFiles();
         if (commands != null) { Arrays.sort(commands); int count=0; for (File command:commands) { if (++count>3000) break; if (command.isFile() && command.canExecute()) result.add(new Entry("command",command.getName(),command.getAbsolutePath(),"exec " + DesktopEntry.quote(command.getAbsolutePath()))); } }
+        File pluginDirectory=new File(home,".config/hometty/plugins"); File[] plugins=pluginDirectory.listFiles((dir,name)->name.endsWith(".toml"));
+        if (plugins!=null) { Arrays.sort(plugins); int count=0; for (File file:plugins) {
+            if (++count>200) break;
+            try { HomeFiles.contained(home,file); PluginManifest manifest=new PluginManifest(BoundedFiles.read(file,262144)); if ("command".equals(manifest.surface)) result.add(new Entry("plugin",manifest.name,file.getAbsolutePath(),"")); }
+            catch (IOException | RuntimeException invalid) { /* No executable result for invalid manifest. */ }
+        } }
         scan(home, home.getCanonicalPath(), 0, result, new int[]{0});
         return Collections.unmodifiableList(result);
     }

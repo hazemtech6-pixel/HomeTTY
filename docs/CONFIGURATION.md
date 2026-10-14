@@ -4,13 +4,15 @@ HomeTTY uses a full TOML parser. Native Settings validates and atomically saves
 `~/.config/hometty/config.toml`; the terminal editor action opens that exact file
 using `$EDITOR` (or `vi`) once a compatible bootstrap is installed. Unknown
 settings are preserved; malformed input is rejected without resetting the file.
-A specialized settings TUI is not yet implemented.
+The Python/curses settings TUI edits the same file and requires the rebuilt HomeTTY Python package.
 
 ```toml
 [home]
 columns = 4
 clock = true
 dock = true
+# Android components and search-result IDs, in chosen order.
+pins = ["com.example/com.example.Main"]
 
 [weather]
 enabled = true
@@ -107,3 +109,42 @@ inside enabled AI. Conversations stay in memory; leaving the foreground cancels
 pending work. Responses are displayed as text and cannot run tools or commands.
 The Android fixture-server test verifies protocol behavior and zero connections
 while disabled; it does not verify a real model/server.
+
+App label/icon overrides use literal Android component keys in the same TOML:
+
+```toml
+[app_overrides."com.example/com.example.MainActivity"]
+label = "Example"
+icon = "~/.config/hometty/icons/your-icon.png"
+```
+
+Long-press an app to rename it, choose a bitmap icon through Android's picker,
+or reset its icon. Images are imported off the UI thread, limited to 1 MiB/8192
+source pixels, normalized to at most 128 pixels and stored by content hash.
+
+Plugins can declare `tool`, `command`, `widget`, `tab`, `theme` or `integration`
+surfaces. Widget/tab/theme capabilities must be explicitly requested and granted.
+Every activation revalidates the manifest digest. Shell actions still require
+HomeTTY confirmation and the terminal lock gate. The bundled official registry
+contains declarative Wi-Fi, calendar widget and night-theme entries. Browsing a
+catalog downloads data for review; importing never executes or grants capabilities.
+Catalog checksums, plugin ID and version must match before import. Public GitHub
+blob URLs are resolved to their raw catalog data; direct catalogs require HTTPS.
+
+```toml
+[[plugin_sources]]
+name = "My public catalog"
+url = "https://example.org/catalog.toml"
+
+[theme]
+plugin = "night"
+```
+
+Theme selection edits TOML and takes effect only while the exact theme manifest
+has a capability grant. Revocation returns the native launcher to default colors.
+Scalar edits preserve unrelated values/comments and reject ambiguous complex TOML
+instead of replacing it. Advanced syntax remains editable through the full editor.
+
+Pin changes are written to `home.pins`. Existing runtime-state pins remain readable
+until the first pin/unpin change copies them into TOML. An explicit empty array
+clears the selections and overrides legacy pins. Usage counts remain runtime state.

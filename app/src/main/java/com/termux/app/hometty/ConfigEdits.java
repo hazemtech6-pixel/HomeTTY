@@ -8,7 +8,11 @@ public final class ConfigEdits {
     private static final Pattern ASSIGNMENT=Pattern.compile("^(\\s*[^=]+?\\s*=\\s*)(.*)$");
     public static String scalar(String source,String dotted,Object value) {
         if (!dotted.matches("[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*")) throw new IllegalArgumentException("Invalid configuration key");
-        TomlParseResult before=HomeConfig.parse(source); List<String> path=Arrays.asList(dotted.split("\\."));
+        return scalar(source,Arrays.asList(dotted.split("\\.")),value);
+    }
+    public static String scalar(String source,List<String> path,Object value) {
+        if (path.isEmpty() || path.stream().anyMatch(part -> part.isEmpty() || part.length()>4096)) throw new IllegalArgumentException("Invalid configuration key");
+        TomlParseResult before=HomeConfig.parse(source);
         List<String> lines=new ArrayList<>(Arrays.asList(source.split("\\n",-1))); String literal=literal(value); boolean changed=false;
         TomlPosition position=before.inputPositionOf(path);
         if (position!=null) {
@@ -16,22 +20,29 @@ public final class ConfigEdits {
             if (assignment.matches()) { lines.set(index,assignment.group(1)+literal+comment(assignment.group(2))); changed=true; }
         } else if (path.size()>1) {
             List<String> parent=path.subList(0,path.size()-1); TomlPosition header=before.inputPositionOf(parent);
-            if (header!=null && lines.get(header.line()-1).trim().matches("\\[[^\\[\\]]+\\]\\s*(?:#.*)?")) { lines.add(header.line(),path.get(path.size()-1)+" = "+literal); changed=true; }
+            if (header!=null && lines.get(header.line()-1).trim().matches("\\[[^\\[\\]]+\\]\\s*(?:#.*)?")) { lines.add(header.line(),literal(path.get(path.size()-1))+" = "+literal); changed=true; }
         }
         String result;
         if (changed) result=String.join("\n",lines);
-        else if (path.size()==1) result=path.get(0)+" = "+literal+"\n"+source;
-        else result=source.replaceAll("\\s+$","")+"\n\n["+String.join(".",path.subList(0,path.size()-1))+"]\n"+path.get(path.size()-1)+" = "+literal+"\n";
+        else if (path.size()==1) result=literal(path.get(0))+" = "+literal+"\n"+source;
+        else result=source.replaceAll("\\s+$","")+"\n\n["+quotedPath(path.subList(0,path.size()-1))+"]\n"+literal(path.get(path.size()-1))+" = "+literal+"\n";
         try {
             TomlParseResult after=HomeConfig.parse(result);
             Object expected=value instanceof Integer?((Integer)value).longValue():value;
-            if (!Objects.equals(expected,after.get(path))) throw new IllegalArgumentException("Ambiguous scalar syntax");
+            if (!Objects.equals(expected,normalize(after.get(path)))) throw new IllegalArgumentException("Ambiguous scalar syntax");
             Map<String,Object> original=table(before), replacement=table(after); remove(original,path,0); remove(replacement,path,0);
             if (!original.equals(replacement)) throw new IllegalArgumentException("Edit would change other configuration");
             return result;
         } catch (RuntimeException error) { throw new IllegalArgumentException("This field uses complex TOML syntax; use the full editor",error); }
     }
+    private static String quotedPath(List<String> path) { List<String> quoted=new ArrayList<>(); for (String part:path) quoted.add(literal(part)); return String.join(".",quoted); }
     public static String literal(Object value) {
+        if (value instanceof List) {
+            List<?> values=(List<?>)value;
+            if (values.size()>4096 || values.stream().anyMatch(item -> !(item instanceof String))) throw new IllegalArgumentException("Expected a bounded string list");
+            List<String> literals=new ArrayList<>(); for (Object item:values) literals.add(literal(item));
+            return "["+String.join(", ",literals)+"]";
+        }
         if (value instanceof Boolean || value instanceof Long || value instanceof Integer) return value.toString();
         if (value instanceof Double && Double.isFinite((Double)value)) return value.toString();
         if (!(value instanceof String)) throw new IllegalArgumentException("Unsupported scalar");
@@ -48,6 +59,7 @@ public final class ConfigEdits {
         for (int index=0;index<tail.length();index++) { char character=tail.charAt(index); if (escaped) escaped=false; else if (quote=='"' && character=='\\') escaped=true; else if (quote!=0 && character==quote) quote=0; else if (quote==0 && (character=='"' || character=='\'')) quote=character; else if (quote==0 && character=='#') return " "+tail.substring(index); }
         return "";
     }
+    public static Map<String,Object> snapshot(TomlTable value) { return table(value); }
     private static Map<String,Object> table(TomlTable table) {
         Map<String,Object> result=new TreeMap<>(); for (Map.Entry<String,Object> entry:table.entrySet()) result.put(entry.getKey(),normalize(entry.getValue())); return result;
     }
