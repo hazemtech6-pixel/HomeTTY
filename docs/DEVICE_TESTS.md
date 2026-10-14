@@ -101,3 +101,17 @@ continuation (including uncommitted companion integration at test time):
 
 The other checklist entries remain pending unless separately recorded. These
 results do not establish behavior on physical devices or with rebuilt packages.
+
+- Setup choices: reopen a WAITING desktop question after rotation/process restart,
+  select each desktop and X11/VNC separately, decline components safely, and run
+  the APT recipes against a signed custom repository. Confirm package prompts
+  retain the same PTY and apt status records advance the visible progress.
+
+- Home pages: drag an icon into an empty slot and swap two icons, move an app to
+  a new page, rotate/restart/reload TOML, and uninstall/reinstall an app. Check
+  stable slots, app-label actions, touch drag cancellation and large-font layouts.
+
+Observed on the API 29 x86_64 emulator: configured pages and an empty slot survived
+activity recreation; an injected Android touch drag swapped Calendar and Camera
+and persisted the arrangement into `home.layout`. Physical touch and vendor HOME
+lifecycle behavior remain pending.

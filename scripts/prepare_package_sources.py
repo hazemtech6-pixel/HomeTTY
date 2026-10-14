@@ -30,6 +30,12 @@ def prepare(root):
     replace_once(properties, 'TERMUX__NAME="Termux"', 'TERMUX__NAME="HomeTTY"')
     replace_once(properties, 'TERMUX_APP__PACKAGE_NAME="com.termux"', f'TERMUX_APP__PACKAGE_NAME="{APPLICATION_ID}"')
     replace_once(properties, 'TERMUX_API_APP__PACKAGE_NAME="com.termux.api"', f'TERMUX_API_APP__PACKAGE_NAME="{APPLICATION_ID}.api"')
+    # Upstream's nightly helper downloads mutable, prebuilt stock-prefix content.
+    # HomeTTY builds its loader from the pinned companion sources instead.
+    nightly = root / 'x11-packages/termux-x11-nightly/build.sh'
+    text = nightly.read_text()
+    if '# HOMETTY_NO_STOCK_X11' not in text:
+        nightly.write_text(text + '\n# HOMETTY_NO_STOCK_X11\ntermux_step_get_source() {\n    termux_error_exit "Use the source-built hometty-x11 companion package, not stock nightly binaries"\n}\n')
     for script, package in [('termux_step_create_debian_package.sh', '$TERMUX_PKG_NAME'), ('termux_create_debian_subpackages.sh', '$SUB_PKG_NAME')]:
         control = root / 'scripts/build' / script
         replace_once(control, f'Package: {package}\n', f'Package: {package}\n\t\tX-HomeTTY-Application-ID: {APPLICATION_ID}\n')

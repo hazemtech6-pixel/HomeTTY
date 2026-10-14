@@ -37,7 +37,7 @@ class BootstrapTest(unittest.TestCase):
         self.manifest()
         with open(self.source / 'bootstrap-arm.zip', 'ab') as out: out.write(b'tampered')
         with self.assertRaises(ValueError): prepare(str(self.source), self.destination)
-    def test_symlink_escape_conflict_and_stock_elf_rejected(self):
+    def test_symlink_escape_and_conflict_rejected(self):
         for bad in ('bash←../outside\n', '/data/data/com.termux/files/usr/bin/bash←bin/sh\n', 'bash←bin/bash\n', 'bash←bin/link\nbash←bin/link/child\n'):
             self.manifest()
             hashes = {}
@@ -50,6 +50,19 @@ class BootstrapTest(unittest.TestCase):
             manifest = json.loads((self.source / 'manifest.json').read_text()); manifest['sha256'] = hashes
             (self.source / 'manifest.json').write_text(json.dumps(manifest))
             with self.assertRaises(ValueError): prepare(str(self.source), self.destination)
+
+    def test_stock_prefix_inside_elf_rejected_even_with_valid_archive_hash(self):
+        self.manifest()
+        hashes = {}
+        for arch in ARCHES:
+            path = self.source / f'bootstrap-{arch}.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('bin/bash', b'\x7fELF' + b'\0' * 65530 + b'/data/data/com.termux/files/usr/lib')
+                archive.writestr('SYMLINKS.txt', 'bash←bin/sh\n')
+            hashes[arch] = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest = json.loads((self.source / 'manifest.json').read_text()); manifest['sha256'] = hashes
+        (self.source / 'manifest.json').write_text(json.dumps(manifest))
+        with self.assertRaises(ValueError): prepare(str(self.source), self.destination)
 
     def test_verified_archive_staged(self):
         self.manifest()

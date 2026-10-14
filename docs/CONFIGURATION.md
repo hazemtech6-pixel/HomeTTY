@@ -11,7 +11,7 @@ The Python/curses settings TUI edits the same file and requires the rebuilt Home
 columns = 4
 clock = true
 dock = true
-# Android components and search-result IDs, in chosen order.
+# Android components and search-result IDs selected by long-press.
 pins = ["com.example/com.example.Main"]
 
 [weather]
@@ -148,3 +148,15 @@ instead of replacing it. Advanced syntax remains editable through the full edito
 Pin changes are written to `home.pins`. Existing runtime-state pins remain readable
 until the first pin/unpin change copies them into TOML. An explicit empty array
 clears the selections and overrides legacy pins. Usage counts remain runtime state.
+
+The installer records optional component choices in `[setup]` (`api`, `widget`,
+`tasker`, `x11`, `tools`, `desktop`, all booleans). Desktop and display choices
+use `desktop.environment` and `desktop.backend`. Its running step, PTY identity,
+progress and completion records remain in XDG data, outside human configuration.
+
+Home pages use `home.columns` (2–8), `home.rows` (1–8, default 3), and
+`home.layout`, an ordered array of Android launcher component IDs. Empty strings
+reserve positions; unavailable apps retain their slots. Without a layout, Home
+uses the current app list. Long-press an icon to drag it within its page; long-press
+its label for app actions and “Move to Home page”, which can create another page.
+The first move writes the current arrangement into TOML.

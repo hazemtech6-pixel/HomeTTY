@@ -91,8 +91,8 @@ def inspect_deb(path):
     for generated in ('Filename', 'Size', 'SHA256', 'SHA512', 'MD5sum'): fields.pop(generated, None)
     return fields
 
-def build(source, destination, signing_home):
-    packages = sorted(source.glob('*.deb'))
+def build(source, destination, signing_home, extra_packages=()):
+    packages = sorted(set(source.glob('*.deb')) | set(extra_packages))
     if not packages: raise ValueError('No Debian packages to publish locally')
     records = {arch: [] for arch in ARCHES}; pool = destination / 'pool'; pool.mkdir(parents=True, exist_ok=True)
     for package in packages:
@@ -123,4 +123,5 @@ def build(source, destination, signing_home):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(); parser.add_argument('packages', type=Path); parser.add_argument('destination', type=Path); parser.add_argument('--signing-home', type=Path, required=True)
-    args = parser.parse_args(); build(args.packages, args.destination, args.signing_home)
+    parser.add_argument('--extra-package', type=Path, action='append', default=[], help='Also audit and index a locally built companion Debian package')
+    args = parser.parse_args(); build(args.packages, args.destination, args.signing_home, args.extra_package)

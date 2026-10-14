@@ -40,6 +40,7 @@ public final class HomeActivity extends Activity {
     private String selected = "Home";
     private AppWidgetHost widgets;
     private int pendingWidget = -1;
+    private int homePage;
     private String pendingIcon;
     private Runnable afterAuthentication;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -51,7 +52,7 @@ public final class HomeActivity extends Activity {
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-        if (saved != null) { selected = saved.getString("tab", "Home"); pendingWidget = saved.getInt("widget", -1); pendingIcon=saved.getString("icon"); }
+        if (saved != null) { selected = saved.getString("tab", "Home"); pendingWidget = saved.getInt("widget", -1); pendingIcon=saved.getString("icon"); homePage=saved.getInt("home_page",0); }
         try { config = new HomeConfig(); loadedConfiguration = HomeConfig.read(); state = new LauncherState(); }
         catch (Exception e) { configurationError(e); return; }
         widgets = new AppWidgetHost(this, 1024);
@@ -96,7 +97,7 @@ public final class HomeActivity extends Activity {
     @Override protected void onStart() { super.onStart(); if (widgets != null) widgets.startListening(); }
     @Override protected void onStop() { ActivityLock.stop(this); cancelAi(); if (widgets != null) widgets.stopListening(); super.onStop(); }
     @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); indexWorker.shutdownNow(); if (aiWorker!=null) aiWorker.shutdownNow(); if (widgets != null) unregisterReceiver(packages); super.onDestroy(); }
-    @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); out.putString("icon",pendingIcon); }
+    @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); out.putString("tab", selected); out.putInt("widget", pendingWidget); out.putString("icon",pendingIcon); out.putInt("home_page",homePage); }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); if (config != null) show("Home"); }
     @Override public void onBackPressed() { if (config != null) show("Home"); }
     private void build() {
@@ -152,6 +153,7 @@ public final class HomeActivity extends Activity {
         android.net.ConnectivityManager network=getSystemService(android.net.ConnectivityManager.class);
         android.net.NetworkInfo active=network.getActiveNetworkInfo();
         text(active!=null && active.isConnected() ? "Network: "+active.getTypeName() : "Offline",14).setOnClickListener(v -> open(new Intent(Settings.ACTION_WIFI_SETTINGS)));
+        renderHomePages();
         search();
         if (config.flag("home.dock", true)) { text("Pinned apps",18); renderApps("", true, content); }
         for (int id : widgetIds()) {
@@ -238,15 +240,77 @@ public final class HomeActivity extends Activity {
             if (pinnedOnly && !isPinned(id(item))) continue;
             if (!label(item).toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT))) continue;
             if (index++ % config.columns() == 0) { row = new LinearLayout(this); target.addView(row); }
-            LinearLayout tile = new LinearLayout(this); tile.setGravity(Gravity.CENTER); tile.setOrientation(LinearLayout.VERTICAL); tile.setPadding(8,12,8,12); row.addView(tile,new LinearLayout.LayoutParams(0,-2,1));
+            row.addView(appTile(item),new LinearLayout.LayoutParams(0,-2,1));
+        }
+    }
+    private LinearLayout appTile(ResolveInfo item) {
+        LinearLayout tile = new LinearLayout(this); tile.setGravity(Gravity.CENTER); tile.setOrientation(LinearLayout.VERTICAL); tile.setPadding(8,12,8,12);
             ImageView icon = new ImageView(this); icon.setImageDrawable(appIcon(item)); tile.addView(icon,new LinearLayout.LayoutParams(dp(48),dp(48)));
-            TextView label = new TextView(this); label.setText(label(item)); label.setTextColor(themeColor("foreground",Color.WHITE)); label.setGravity(Gravity.CENTER); label.setMaxLines(2); tile.addView(label);
+            TextView label = new TextView(this); label.setText(label(item)); label.setTextSize(12); label.setTextColor(themeColor("foreground",Color.WHITE)); label.setGravity(Gravity.CENTER); label.setMaxLines(2); label.setEllipsize(android.text.TextUtils.TruncateAt.END); tile.addView(label);
             tile.setContentDescription(label(item)); tile.setFocusable(true); tile.setOnClickListener(v -> authenticate("security.lock_apps", () -> {
                 Intent launch = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName.unflattenFromString(id(item))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                 if (open(launch)) put("uses." + id(item), Integer.toString(Math.min(Integer.MAX_VALUE-1,state.uses(id(item)))+1));
             }));
             tile.setOnLongClickListener(v -> { appMenu(item); return true; });
+        return tile;
+    }
+    private HomeLayout homeLayout(HomeConfig current) {
+        List<String> ids=current.strings("home.layout");
+        if (!current.has("home.layout")) { for (ResolveInfo app:activities()) ids.add(id(app)); }
+        return new HomeLayout(ids,current.columns(),(int)current.number("home.rows",3));
+    }
+    private static final class HomeDrag {
+        final HomeLayout layout; final String component;
+        HomeDrag(HomeLayout layout,int from) { this(layout,layout.slots.get(from)); }
+        HomeDrag(HomeLayout layout,String component) { this.layout=layout; this.component=component; }
+    }
+    private void renderHomePages() {
+        HomeLayout layout=homeLayout(config); homePage=Math.max(0,Math.min(homePage,layout.pages()-1));
+        Map<String,ResolveInfo> apps=new HashMap<>(); for (ResolveInfo app:activities()) apps.put(id(app),app);
+        LinearLayout navigation=new LinearLayout(this); content.addView(navigation);
+        Button previous=new Button(this),nextPage=new Button(this); previous.setText("‹"); nextPage.setText("›"); styleButton(previous); styleButton(nextPage);
+        TextView indicator=new TextView(this); indicator.setText("Page "+(homePage+1)+" / "+layout.pages()); indicator.setGravity(Gravity.CENTER); indicator.setTextColor(themeColor("foreground",Color.WHITE));
+        navigation.addView(previous); navigation.addView(indicator,new LinearLayout.LayoutParams(0,-2,1)); navigation.addView(nextPage);
+        previous.setEnabled(homePage>0); nextPage.setEnabled(homePage+1<layout.pages());
+        previous.setOnClickListener(view -> { homePage--; show("Home"); }); nextPage.setOnClickListener(view -> { homePage++; show("Home"); });
+        LinearLayout row=null;
+        for (int offset=0;offset<layout.capacity;offset++) {
+            final int position=homePage*layout.capacity+offset;
+            if (offset%config.columns()==0) { row=new LinearLayout(this); content.addView(row); }
+            String component=position<layout.slots.size()?layout.slots.get(position):""; ResolveInfo app=apps.get(component);
+            LinearLayout tile;
+            if (app==null) { tile=new LinearLayout(this); tile.setMinimumHeight(dp(88)); tile.setContentDescription(component.isEmpty()?"Empty Home position":"Unavailable app: "+component); }
+            else {
+                tile=appTile(app); final LinearLayout dragTile=tile;
+                tile.setOnLongClickListener(view -> dragTile.startDragAndDrop(ClipData.newPlainText("Home app",component),new View.DragShadowBuilder(dragTile),new HomeDrag(layout,position),0));
+                tile.getChildAt(1).setOnLongClickListener(view -> { appMenu(app); return true; });
+            }
+            tile.setOnDragListener((view,event) -> {
+                if (!(event.getLocalState() instanceof HomeDrag)) return false;
+                if (event.getAction()==DragEvent.ACTION_DROP) moveHomeIcon((HomeDrag)event.getLocalState(),position);
+                return true;
+            });
+            row.addView(tile,new LinearLayout.LayoutParams(0,-2,1));
         }
+    }
+    private void chooseHomePage(ResolveInfo app) {
+        HomeLayout layout=homeLayout(config);
+        String[] pages=new String[layout.pages()+1]; for (int index=0;index<pages.length;index++) pages[index]="Page "+(index+1);
+        new AlertDialog.Builder(this).setTitle("Move icon to page").setItems(pages,(choice,page) -> {
+            int target=page*layout.capacity; while (target<(page+1)*layout.capacity && target<layout.slots.size() && !layout.slots.get(target).isEmpty()) target++;
+            if (target>=(page+1)*layout.capacity) { toast("Page is full; move an icon to an empty position first"); return; }
+            moveHomeIcon(new HomeDrag(layout,id(app)),target);
+        }).show();
+    }
+    private void moveHomeIcon(HomeDrag drag,int target) {
+        try {
+            String baseline=HomeConfig.read(); HomeConfig latest=new HomeConfig();
+            HomeLayout current=homeLayout(latest);
+            if (current.capacity!=drag.layout.capacity || !current.slots.equals(drag.layout.slots)) throw new IOException("Home layout changed; retry the move");
+            String updated=ConfigEdits.scalar(baseline,"home.layout",drag.layout.place(drag.component,target));
+            if (!baseline.equals(HomeConfig.read())) throw new IOException("Configuration changed; retry the move");
+            HomeConfig.save(updated); config=new HomeConfig(); loadedConfiguration=updated; homePage=target/drag.layout.capacity; show("Home");
+        } catch (Exception error) { toast(error.getMessage()); }
     }
     private boolean isPinned(String id) { return config.has("home.pins") ? config.strings("home.pins").contains(id) : state.pinned(id); }
     private void togglePin(String id) {
@@ -261,7 +325,7 @@ public final class HomeActivity extends Activity {
         } catch (Exception error) { toast("Could not save pins: "+error.getMessage()); }
     }
     private void appMenu(ResolveInfo item) {
-        new AlertDialog.Builder(this).setTitle(label(item)).setItems(new String[]{isPinned(id(item)) ? "Unpin" : "Pin", "Rename", "App info", "Uninstall", "Shortcuts", "Choose icon", "Reset icon"},(dialog,which) -> {
+        new AlertDialog.Builder(this).setTitle(label(item)).setItems(new String[]{isPinned(id(item)) ? "Unpin" : "Pin", "Rename", "App info", "Uninstall", "Shortcuts", "Choose icon", "Reset icon", "Move to Home page"},(dialog,which) -> {
             if (which == 0) { togglePin(id(item)); show(selected); }
             if (which == 1) fileName("App label",label(item),name -> { if (name.trim().isEmpty() || name.length()>256) throw new IOException("Use a label of 1–256 characters"); saveAppOverride(id(item),"label",name); });
             if (which == 2) open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:" + item.activityInfo.packageName)));
@@ -269,6 +333,7 @@ public final class HomeActivity extends Activity {
             if (which == 4) shortcuts(item);
             if (which == 5) { pendingIcon=id(item); openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),PICK_ICON); }
             if (which == 6) { try { saveAppOverride(id(item),"icon",""); } catch (Exception error) { toast(error.getMessage()); } }
+            if (which == 7) chooseHomePage(item);
         }).show();
     }
     private void saveAppOverride(String component,String field,String value) throws IOException {

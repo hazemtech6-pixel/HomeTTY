@@ -69,7 +69,7 @@ No key is committed, and no repository is hosted or published by these scripts.
 After packages are built, generate a local signed repository:
 
 ```sh
-python3 scripts/build_repository.py .toolchain/termux-packages/output .toolchain/repository --signing-home .toolchain/repository-signing
+python3 scripts/build_repository.py .toolchain/termux-packages/output .toolchain/repository --signing-home .toolchain/repository-signing --extra-package companions/x11/shell-loader/build/outputs/companion/hometty-x11-1.03.01-hometty-fa3a8b430e28-0-all.deb
 ```
 
 The generator checks exact build identity, payload paths and executable prefixes;
@@ -83,3 +83,11 @@ when the original distribution server is unavailable. No source checksum changed
 Interrupted containers may be resumed with `docker start -a <existing-container>`;
 completed packages and verified source caches are retained. Host pacman/AUR packages
 are not installed or updated by this workflow.
+
+The source-built `hometty-x11` CLI/loader package has the same build-identity
+metadata and payload audit as native packages. The source overlay explicitly
+blocks the upstream `termux-x11-nightly` recipe, which downloads mutable stock
+prebuilt content. Desktop setup selects `hometty-x11` for X11 or `tigervnc` for VNC;
+all desktop recipes use the configured signed custom-prefix APT sources and leave
+APT/dpkg confirmation prompts interactive. GNOME still needs custom source-built
+`gnome-shell` and `gnome-session`; no stock release archive is substituted.

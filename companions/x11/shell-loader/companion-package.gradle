@@ -77,6 +77,8 @@ tasks.register('buildCompanionPackage') {
         }
 
         def controlText = """Package: $pkgName
+X-HomeTTY-Application-ID: $embeddedApplicationId
+Provides: termux-x11
 Architecture: all
 Maintainer: $pkgMaintainer
 Version: $pkgVersion

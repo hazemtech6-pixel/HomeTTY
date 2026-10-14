@@ -24,10 +24,11 @@ public final class HomeConfig {
     public static TomlParseResult parse(String text) {
         TomlParseResult result = Toml.parse(text);
         if (result.hasErrors()) throw new IllegalArgumentException(result.errors().toString());
-        for (String key : new String[]{"home.clock", "home.dock", "home.media", "weather.enabled", "ai.enabled", "security.lock_terminal", "security.lock_settings", "security.lock_apps", "security.lock_desktop", "security.lock_privileged", "privilege.rish"})
+        for (String key : new String[]{"home.clock", "home.dock", "home.media", "weather.enabled", "ai.enabled", "security.lock_terminal", "security.lock_settings", "security.lock_apps", "security.lock_desktop", "security.lock_privileged", "privilege.rish", "setup.api", "setup.widget", "setup.tasker", "setup.x11", "setup.desktop", "setup.tools"})
             if (result.contains(key) && !(result.get(key) instanceof Boolean)) throw new IllegalArgumentException(key + " must be true or false");
         if (result.contains("home.columns") && (!(result.get("home.columns") instanceof Long) || result.getLong("home.columns") < 2 || result.getLong("home.columns") > 8))
             throw new IllegalArgumentException("home.columns must be between 2 and 8");
+        if (result.contains("home.rows") && (!(result.get("home.rows") instanceof Long) || result.getLong("home.rows")<1 || result.getLong("home.rows")>8)) throw new IllegalArgumentException("home.rows must be between 1 and 8");
         for (String key : new String[]{"weather.latitude", "weather.longitude"}) {
             if (result.contains(key)) {
                 Object value = result.get(key);
@@ -57,11 +58,15 @@ public final class HomeConfig {
             }
         }
         PluginSources.parse(result);
-        if (result.contains("home.pins")) {
-            if (!(result.get("home.pins") instanceof org.tomlj.TomlArray)) throw new IllegalArgumentException("home.pins must be an array of strings");
-            org.tomlj.TomlArray pins=result.getArray("home.pins");
-            if (pins.size()>4096) throw new IllegalArgumentException("home.pins must contain at most 4096 strings");
+        for (String field:new String[]{"home.pins","home.layout"}) if (result.contains(field)) {
+            if (!(result.get(field) instanceof org.tomlj.TomlArray)) throw new IllegalArgumentException(field+" must be an array of strings");
+            org.tomlj.TomlArray pins=result.getArray(field);
+            if (pins.size()>4096) throw new IllegalArgumentException(field+" must contain at most 4096 strings");
             for (int index=0;index<pins.size();index++) if (!(pins.get(index) instanceof String) || pins.getString(index).length()>4096) throw new IllegalArgumentException("Pin identifiers must be strings of at most 4096 characters");
+            if ("home.layout".equals(field)) {
+                java.util.List<String> slots=new java.util.ArrayList<>(); for (int index=0;index<pins.size();index++) slots.add(pins.getString(index));
+                new HomeLayout(slots,result.contains("home.columns")?result.getLong("home.columns").intValue():4,result.contains("home.rows")?result.getLong("home.rows").intValue():3);
+            }
         }
         if (result.contains("theme.plugin") && !(result.get("theme.plugin") instanceof String)) throw new IllegalArgumentException("theme.plugin must be a plugin ID");
         return result;

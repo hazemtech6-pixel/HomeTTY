@@ -22,6 +22,7 @@ public class HomeSearchTest {
                 AtomicBoolean found=new AtomicBoolean(); long deadline=android.os.SystemClock.elapsedRealtime()+10000;
                 while (!found.get() && android.os.SystemClock.elapsedRealtime()<deadline) { scenario.onActivity(activity -> found.set(contains(activity.findViewById(android.R.id.content),title+" · desktop"))); Thread.sleep(50); }
                 assertTrue("Desktop result was not displayed after asynchronous indexing",found.get());
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
             }
         } finally { entry.delete(); state.put("setup.presented",presented); }
     }

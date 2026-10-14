@@ -14,8 +14,8 @@ def tar_bytes(name, data):
         member = tarfile.TarInfo(name); member.size = len(data); archive.addfile(member, io.BytesIO(data))
     return output.getvalue()
 
-def package(path, identity=APPLICATION_ID, payload=None, executable=b'#!/system/bin/sh\necho fixture\n'):
-    control = f'Package: fixture\nVersion: 1.0\nArchitecture: x86_64\nDescription: Repository test fixture\nX-HomeTTY-Application-ID: {identity}\n'.encode()
+def package(path, identity=APPLICATION_ID, payload=None, executable=b'#!/system/bin/sh\necho fixture\n', name='fixture'):
+    control = f'Package: {name}\nVersion: 1.0\nArchitecture: x86_64\nDescription: Repository test fixture\nX-HomeTTY-Application-ID: {identity}\n'.encode()
     members = [('debian-binary', b'2.0\n'), ('control.tar.xz', tar_bytes('./control', control)), ('data.tar.xz', tar_bytes(payload or f'./{PREFIX}/bin/fixture', executable))]
     with path.open('wb') as output:
         output.write(b'!<arch>\n')
@@ -37,11 +37,16 @@ class RepositoryTest(unittest.TestCase):
         base = ['gpg', '--homedir', str(key_home), '--batch', '--pinentry-mode', 'loopback', '--passphrase', '']
         try:
             subprocess.run(base + ['--quick-generate-key', 'HomeTTY repository test', 'ed25519', 'sign', '1d'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            destination = self.root / 'repository'; build(self.root, destination, key_home)
+            extras = self.root / 'extras'; extras.mkdir(); extra = extras / 'companion.deb'
+            package(extra, name='fixture-extra')
+            destination = self.root / 'repository'; build(self.root, destination, key_home, [extra])
             subprocess.run(base + ['--verify', str(destination / 'dists/stable/InRelease')], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             data = (destination / 'dists/stable/main/binary-x86_64/Packages').read_bytes()
             digest = hashlib.sha256(self.deb.read_bytes()).hexdigest()
             self.assertIn(f'Filename: pool/{digest}.deb'.encode(), data)
+            self.assertIn(b'Package: fixture-extra\n', data)
+            package(extra, identity='com.termux')
+            with self.assertRaises(ValueError): build(self.root, destination, key_home, [extra])
             self.assertEqual(data, gzip.decompress((destination / 'dists/stable/main/binary-x86_64/Packages.gz').read_bytes()))
             self.assertIn(hashlib.sha256(data).hexdigest(), (destination / 'dists/stable/Release').read_text())
             self.assertEqual(b'', (destination / 'dists/stable/main/binary-aarch64/Packages').read_bytes())
