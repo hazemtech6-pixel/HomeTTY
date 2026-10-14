@@ -46,7 +46,7 @@ public final class HomeActivity extends Activity {
     private final List<Dialog> backgroundDialogs=new ArrayList<>();
     private Runnable afterAuthentication;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17, PICK_ICON = 18, PICK_APP_UPDATE = 19, BACKUP_HOME = 20, RESTORE_HOME = 21;
+    private static final int PICK_WIDGET = 10, CONFIGURE_WIDGET = 11, AUTHENTICATE = 12, STORAGE = 13, BACKUP = 14, RESTORE = 15, IMPORT_PLUGIN = 16, REQUEST_HOME = 17, PICK_ICON = 18, PICK_APP_UPDATE = 19, BACKUP_HOME = 20, RESTORE_HOME = 21, IMPORT_RISH = 22;
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) { if ("Apps".equals(selected) || "Home".equals(selected)) show(selected); }
     };
@@ -386,7 +386,7 @@ public final class HomeActivity extends Activity {
         action("Plugins and sources", this::plugins);
         action("HomeTTY companions", this::companions);
         action("Privilege providers", this::privilege);
-        if (config.flag("privilege.rish", false)) action("RISH", () -> authenticate("security.lock_privileged", () -> confirm("Start RISH with the privileges granted by your Shizuku provider?", () -> ShellCommands.run(this,"rish"))));
+        if (config.flag("privilege.rish", false)) action("RISH", () -> authenticate("security.lock_privileged", () -> confirm("Start RISH with the privileges granted by your Shizuku provider?", () -> { try { ShellCommands.system(this,RishInstaller.command(HomeConfig.HOME)); } catch (Exception error) { toast(error.getMessage()); } })));
     }
     private void companions() {
         content.removeAllViews(); text("HomeTTY companions",26);
@@ -405,6 +405,7 @@ public final class HomeActivity extends Activity {
         content.removeAllViews(); text("Privilege providers",26); text(PrivilegeBackends.describe(this),16);
         action("Request Shizuku authorization", () -> { try { PrivilegeBackends.requestShizuku(); } catch (Exception e) { toast(e.getMessage()); } });
         action("Refresh capabilities",this::privilege);
+        action("Import exported RISH DEX", () -> authenticate("security.lock_privileged", () -> openForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),IMPORT_RISH)));
         action("Root identity check", () -> authenticate("security.lock_privileged", () -> confirm("Run ‘id’ through your root manager? Its approval is still required.", () -> { try { ShellCommands.system(this,PrivilegeBackends.rootCommand("id")); } catch (Exception e) { toast(e.getMessage()); } })));
         action("Reboot with root", () -> authenticate("security.lock_privileged", () -> confirm("Reboot this Android device now? Unsaved work may be lost. Root permission does not bypass this confirmation.", () -> { try { ShellCommands.system(this,PrivilegeBackends.rootCommand("reboot")); } catch (Exception e) { toast(e.getMessage()); } })));
 
@@ -826,6 +827,17 @@ public final class HomeActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
         if (ActivityLock.result(this,request,result)) return;
+        if (request==IMPORT_RISH) {
+            if (result==RESULT_OK && data!=null && data.getData()!=null) {
+                Uri uri=data.getData();
+                indexWorker.execute(() -> {
+                    File staged=null; String failure=null;
+                    try (InputStream input=getContentResolver().openInputStream(uri)) { if (input==null) throw new IOException("Cannot read selected payload"); staged=RishInstaller.stage(input,new File(getCacheDir(),"rish-import")); } catch (Exception error) { failure=error.getMessage(); }
+                    final File payload=staged; final String message=failure;
+                    runOnUiThread(() -> { if (isFinishing() || isDestroyed()) return; if (message!=null) toast(message); else confirm("Install this exported provider payload? Only import RISH from your trusted provider. It will not run yet.\nSHA-256: "+payload.getName().substring(5,69), () -> authenticate("security.lock_privileged", () -> { try { RishInstaller.install(payload,HomeConfig.HOME); toast("RISH imported; enable privilege.rish in TOML to expose its launch action"); } catch (Exception error) { toast(error.getMessage()); } })); });
+                });
+            } return;
+        }
         if (request==PICK_ICON) {
             String component=pendingIcon; pendingIcon=null;
             if (result==RESULT_OK && component!=null && data!=null && data.getData()!=null) {

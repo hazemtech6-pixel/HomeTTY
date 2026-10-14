@@ -129,3 +129,9 @@ lifecycle behavior remain pending.
   interrupted operations. Kill the process during merge, relaunch Home, verify journal rollback and
   independently edited-file conflict handling. Host process-loss simulation passes;
   Android process-death verification remains pending.
+
+- RISH local import: export `rish_shizuku.dex` from a trusted compatible provider,
+  review the displayed SHA-256, enable `privilege.rish`, authorize the provider and
+  launch through the guarded Tools action. Verify Android 14+ read-only DEX loading,
+  PTY interaction, shared-UID identity, denial/revocation, and Shizuku-Next compatibility.
+  No provider payload is downloaded or executed during import. Runtime checks pending.
