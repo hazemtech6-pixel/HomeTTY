@@ -122,7 +122,8 @@ backup with reviewed merge restore. The Home-file archive excludes cache,
 symlinks, Keystore secrets and device-bound Android/plugin grants; replaced files
 are retained in a private rollback folder. Its logic has host tests, while the
 Android storage-provider flow still needs device verification. Installed-prefix
-backup, symlink preservation and process-death recovery remain unfinished.
+backup and symlink preservation remain unfinished. Home-file restore now uses a
+persistent recovery journal; Android process-death verification remains pending.
 
 Update controls can review/upgrade packages from configured signed HomeTTY
 repositories and stage a user-selected newer HomeTTY APK. APK checks require the

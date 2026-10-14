@@ -126,4 +126,6 @@ lifecycle behavior remain pending.
 - Home-file backup/restore: export through several SAF providers, review/merge
   into Home, verify file/empty-directory/executable handling and retained originals,
   confirm secrets/grants/cache exclusion, test full storage, large archives and
-  interrupted operations. Process-death restore recovery remains unfinished.
+  interrupted operations. Kill the process during merge, relaunch Home, verify journal rollback and
+  independently edited-file conflict handling. Host process-loss simulation passes;
+  Android process-death verification remains pending.

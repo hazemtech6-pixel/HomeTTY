@@ -54,6 +54,12 @@ public final class HomeActivity extends Activity {
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        if (HomeArchive.needsRecovery(HomeConfig.HOME)) {
+            TextView recovery=new TextView(this); recovery.setTypeface(android.graphics.Typeface.MONOSPACE); recovery.setPadding(dp(16),dp(24),dp(16),dp(24)); recovery.setText("hometty: recovering interrupted Home restore…"); setContentView(recovery);
+            indexWorker.execute(() -> { String failure=null; try { long deadline=SystemClock.elapsedRealtime()+10000; while (HomeArchive.isRestoreRunning(HomeConfig.HOME) && SystemClock.elapsedRealtime()<deadline) Thread.sleep(25); HomeArchive.recover(HomeConfig.HOME); } catch (Exception error) { failure=error.getMessage(); } final String message=failure;
+                runOnUiThread(() -> { if (isFinishing() || isDestroyed()) return; if (message==null) recreate(); else recovery.setText("Home restore recovery requires review:\n"+message+"\nOriginal copies and the journal are retained. No conflicting file was overwritten."); }); });
+            return;
+        }
         if (saved != null) { selected = saved.getString("tab", "Home"); pendingWidget = saved.getInt("widget", -1); pendingIcon=saved.getString("icon"); homePage=saved.getInt("home_page",0); pendingUpdate=saved.getString("update"); }
         try { config = new HomeConfig(); loadedConfiguration = HomeConfig.read(); state = new LauncherState(); }
         catch (Exception e) { configurationError(e); return; }

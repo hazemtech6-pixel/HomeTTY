@@ -23,7 +23,7 @@ public class HomeArchiveTest {
         assertTrue(Files.isDirectory(destination.resolve("empty"))); assertTrue(destination.resolve("script").toFile().canExecute());
         assertFalse(Files.exists(destination.resolve(".local/share/hometty/test.sealed"))); assertFalse(Files.exists(destination.resolve(".cache/file")));
         String state=new String(Files.readAllBytes(destination.resolve(".local/share/hometty/launcher.properties")),"UTF-8"); assertTrue(state.contains("uses.app=3")); assertFalse(state.contains("grant.")); assertFalse(state.contains("widgets"));
-        assertEquals("old",new String(Files.readAllBytes(staged.directory.toPath().resolve("rollback/notes/file.txt")),"UTF-8"));
+        assertEquals("old",new String(Files.readAllBytes(destination.resolve(".cache/hometty/"+staged.directory.getName()+"/rollback/notes/file.txt")),"UTF-8"));
     }
     @Test public void traversalSecretsAndForgedCapabilityStateAreRejected() throws Exception {
         for (String path:new String[]{"home/../escape","home/.local/share/hometty/test.sealed","home/.local/share/hometty/launcher.properties.bak","home/.config/hometty/config.toml.bak","home/.local/share/hometty/launcher.properties"}) {
@@ -49,6 +49,15 @@ public class HomeArchiveTest {
         try { HomeArchive.restore(staged,destination.toFile(),(size,count) -> Thread.currentThread().interrupt()); fail(); }
         catch (InterruptedIOException expected) { assertTrue(Thread.interrupted()); }
         finally { Thread.interrupted(); }
+        for (String name:new String[]{"a","b"}) assertEquals("old",new String(Files.readAllBytes(destination.resolve(name)),"UTF-8"));
+    }
+    @Test public void journalRecoversAfterAProducerDisappearsMidRestore() throws Exception {
+        Path home=temporary.resolve("source"),destination=temporary.resolve("destination"); Files.createDirectories(home); Files.createDirectories(destination);
+        for (String name:new String[]{"a","b"}) { write(home,name,"new"); write(destination,name,"old"); }
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream(); HomeArchive.create(home.toFile(),bytes,null);
+        HomeArchive.Staged staged=HomeArchive.stage(new ByteArrayInputStream(bytes.toByteArray()),temporary.resolve("cache").toFile(),null);
+        try { HomeArchive.restore(staged,destination.toFile(),(size,count) -> { throw new IllegalStateException("simulated process loss"); }); fail(); } catch (IllegalStateException expected) {}
+        assertTrue(HomeArchive.needsRecovery(destination.toFile())); HomeArchive.recover(destination.toFile()); assertFalse(HomeArchive.needsRecovery(destination.toFile()));
         for (String name:new String[]{"a","b"}) assertEquals("old",new String(Files.readAllBytes(destination.resolve(name)),"UTF-8"));
     }
 }

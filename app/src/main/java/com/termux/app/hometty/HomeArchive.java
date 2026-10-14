@@ -3,12 +3,15 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.zip.*;
+import java.security.MessageDigest;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Portable Home files. Device secrets, grants and caches are deliberately nonportable. */
 public final class HomeArchive {
     private static final String APP="com.hazemtech.termux.hometty";
     private static final long MAX_BYTES=8L*1024*1024*1024;
     private static final int MAX_ENTRIES=100000;
+    private static final Set<String> activeRestores=ConcurrentHashMap.newKeySet();
     public interface Progress { void update(long bytes,int files); }
     public static final class Staged {
         public final File directory;
@@ -110,31 +113,97 @@ public final class HomeArchive {
             return new Staged(directory,files,directories,bytes);
         } catch (RuntimeException error) { throw new IOException("Invalid backup configuration",error); }
     }
-    /** Merge reviewed files; existing files are retained in the staging rollback folder. */
-    public static void restore(Staged staged,File home,Progress progress) throws IOException {
-        File root=home.getCanonicalFile(); List<String> changed=new ArrayList<>(); Set<String> old=new HashSet<>(); long bytes=0;
-        // Complete preflight before modifying Home.
-        for (String path:staged.directories) { validPath(path); File target=HomeFiles.contained(root,new File(root,path)); if (target.exists() && !target.isDirectory()) throw new IOException("A directory would replace an existing file"); }
-        for (String path:staged.files) { validPath(path); File target=HomeFiles.contained(root,new File(root,path)); if (target.isDirectory()) throw new IOException("A file would replace an existing directory"); }
+    private static File journal(File home) { return new File(home,".local/share/hometty/restore-journal.properties"); }
+    public static boolean needsRecovery(File home) { return journal(home).isFile(); }
+    public static boolean isRestoreRunning(File home) throws IOException { return activeRestores.contains(home.getCanonicalPath()); }
+    private static String hash(File file) throws IOException {
         try {
-            for (String path:staged.directories) { File target=HomeFiles.contained(root,new File(root,path)); if (!target.isDirectory() && !target.mkdirs()) throw new IOException("Cannot restore directory"); }
-            for (String path:staged.files) {
-                interrupted(); File source=HomeFiles.contained(staged.directory,new File(staged.directory,"payload/"+path));
-                File target=HomeFiles.contained(root,new File(root,path));
-                if (target.exists()) { File previous=new File(staged.directory,"rollback/"+path); copyFile(target,previous); old.add(path); }
-                changed.add(path); copyFile(source,target); bytes+=source.length(); if (progress!=null) progress.update(bytes,changed.size());
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            try (InputStream input=new FileInputStream(file)) { byte[] buffer=new byte[32768]; int count; while ((count=input.read(buffer))!=-1) { interrupted(); digest.update(buffer,0,count); } }
+            StringBuilder hex=new StringBuilder(); for (byte value:digest.digest()) hex.append(String.format(Locale.ROOT,"%02x",value&255)); return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IOException(impossible); }
+    }
+    private static void saveJournal(File root,Properties record) throws IOException {
+        File target=HomeFiles.contained(root,journal(root)); if (!target.getParentFile().isDirectory() && !target.getParentFile().mkdirs()) throw new IOException("Cannot create recovery journal");
+        File temporary=File.createTempFile(".restore-journal-", ".tmp",target.getParentFile());
+        try { try (FileOutputStream output=new FileOutputStream(temporary)) { record.store(output,"HomeTTY restore recovery"); output.getFD().sync(); } if (temporary.length()>16*1024*1024) throw new IOException("Recovery journal is too large"); if (!temporary.renameTo(target)) throw new IOException("Cannot commit restore journal"); }
+        finally { temporary.delete(); }
+    }
+    /** Roll back an interrupted transaction; preserve and report independently changed files. */
+    public static void recover(File home) throws IOException {
+        File root=home.getCanonicalFile(); String key=root.getPath();
+        if (!activeRestores.add(key)) throw new IOException("Home restore is still running");
+        try { recoverInternal(root); } finally { activeRestores.remove(key); }
+    }
+    private static void recoverInternal(File root) throws IOException {
+        File file=HomeFiles.contained(root,journal(root)); if (!file.exists()) return;
+        if (file.length()>16*1024*1024) throw new IOException("Recovery journal is too large");
+        Properties record=new Properties(); try (InputStream input=new FileInputStream(file)) { record.load(input); }
+        if (!"1".equals(record.getProperty("format"))) throw new IOException("Invalid restore journal");
+        String name=record.getProperty("staging",""); if (!name.matches("restore-[a-f0-9-]{36}")) throw new IOException("Invalid recovery staging name");
+        File stage=HomeFiles.contained(root,new File(root,".cache/hometty/"+name));
+        int count; try { count=Integer.parseInt(record.getProperty("count","")); } catch (NumberFormatException bad) { throw new IOException("Invalid recovery count",bad); }
+        if (count<0 || count>MAX_ENTRIES) throw new IOException("Invalid recovery count");
+        if (!"COMMITTED".equals(record.getProperty("phase"))) {
+            if (!"PREPARED".equals(record.getProperty("phase"))) throw new IOException("Invalid recovery phase");
+            for (int index=count-1;index>=0;index--) {
+                String prefix="file."+index+".",path=validPath(record.getProperty(prefix+"path",""));
+                String old=record.getProperty(prefix+"old",""),incoming=record.getProperty(prefix+"new","");
+                if (!incoming.matches("[a-f0-9]{64}") || !(old.equals("-") || old.matches("[a-f0-9]{64}"))) throw new IOException("Invalid recovery hashes");
+                File target=HomeFiles.contained(root,new File(root,path)); String current=target.exists()?hash(target):"-";
+                if (current.equals(old)) continue;
+                if (!current.equals(incoming)) throw new IOException("Restore recovery conflict at "+path+"; original copies are retained");
+                if (old.equals("-")) { if (!target.delete()) throw new IOException("Cannot remove partial restored file"); }
+                else {
+                    File previous=HomeFiles.contained(stage,new File(stage,"rollback/"+path));
+                    if (!hash(previous).equals(old)) throw new IOException("Recovery copy changed: "+path);
+                    copyFile(previous,target);
+                }
             }
-        } catch (IOException failure) {
-            boolean wasInterrupted=Thread.interrupted();
-            Collections.reverse(changed);
-            for (String path:changed) try {
-                File target=HomeFiles.contained(root,new File(root,path));
-                if (old.contains(path)) copyFile(new File(staged.directory,"rollback/"+path),target);
-                else if (target.exists() && !target.delete()) throw new IOException("Cannot remove partial restored file");
-            } catch (IOException rollback) { failure.addSuppressed(rollback); }
-            if (wasInterrupted) Thread.currentThread().interrupt();
-            throw failure;
         }
+        if (!file.delete()) throw new IOException("Cannot finish restore recovery");
+    }
+    /** Merge reviewed files; prepare original copies and a journal before touching Home. */
+    public static void restore(Staged staged,File home,Progress progress) throws IOException {
+        File root=home.getCanonicalFile(); String key=root.getPath();
+        if (!activeRestores.add(key)) throw new IOException("Another Home restore is running");
+        try {
+            if (needsRecovery(root)) throw new IOException("Recover the previous Home restore first");
+            File expected=HomeFiles.contained(root,new File(root,".cache/hometty/"+staged.directory.getName()));
+            // Host callers may stage outside Home; copy the payload into the fixed recovery cache.
+            if (!staged.directory.getCanonicalFile().equals(expected)) {
+                if (!expected.mkdirs()) throw new IOException("Cannot create recovery staging folder");
+                for (String path:staged.files) copyFile(HomeFiles.contained(staged.directory,new File(staged.directory,"payload/"+path)),new File(expected,"payload/"+path));
+                staged=new Staged(expected,new ArrayList<>(staged.files),new ArrayList<>(staged.directories),staged.bytes);
+            }
+            Properties record=new Properties(); record.setProperty("format","1"); record.setProperty("staging",staged.directory.getName()); record.setProperty("phase","PREPARED"); record.setProperty("count",Integer.toString(staged.files.size()));
+            for (String path:staged.directories) { validPath(path); File target=HomeFiles.contained(root,new File(root,path)); if (target.exists() && !target.isDirectory()) throw new IOException("A directory would replace an existing file"); }
+            for (int index=0;index<staged.files.size();index++) {
+                String path=validPath(staged.files.get(index)),prefix="file."+index+".";
+                File target=HomeFiles.contained(root,new File(root,path)),source=HomeFiles.contained(staged.directory,new File(staged.directory,"payload/"+path));
+                if (target.isDirectory()) throw new IOException("A file would replace an existing directory");
+                record.setProperty(prefix+"path",path); record.setProperty(prefix+"new",hash(source));
+                if (target.exists()) { File previous=new File(staged.directory,"rollback/"+path); copyFile(target,previous); record.setProperty(prefix+"old",hash(previous)); }
+                else record.setProperty(prefix+"old","-");
+            }
+            saveJournal(root,record); long bytes=0; int completed=0;
+            try {
+                for (String path:staged.directories) { File target=HomeFiles.contained(root,new File(root,path)); if (!target.isDirectory() && !target.mkdirs()) throw new IOException("Cannot restore directory"); }
+                for (String path:staged.files) {
+                    interrupted(); File source=HomeFiles.contained(staged.directory,new File(staged.directory,"payload/"+path)),target=HomeFiles.contained(root,new File(root,path));
+                    String prefix="file."+completed+".",current=target.exists()?hash(target):"-";
+                    if (!current.equals(record.getProperty(prefix+"old"))) throw new IOException("Home file changed during restore: "+path);
+                    if (!hash(source).equals(record.getProperty(prefix+"new"))) throw new IOException("Staged backup changed: "+path);
+                    copyFile(source,target); bytes+=source.length(); completed++; if (progress!=null) progress.update(bytes,completed);
+                }
+                record.setProperty("phase","COMMITTED"); saveJournal(root,record); if (!journal(root).delete()) throw new IOException("Restore committed; recovery journal cleanup is pending");
+            } catch (IOException failure) {
+                boolean wasInterrupted=Thread.interrupted();
+                try { recoverInternal(root); } catch (IOException rollback) { failure.addSuppressed(rollback); }
+                finally { if (wasInterrupted) Thread.currentThread().interrupt(); }
+                throw failure;
+            }
+        } finally { activeRestores.remove(key); }
     }
     private static void copyFile(File source,File target) throws IOException {
         if (!target.getParentFile().isDirectory() && !target.getParentFile().mkdirs()) throw new IOException("Cannot create restore folder");

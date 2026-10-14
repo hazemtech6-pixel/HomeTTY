@@ -16,6 +16,7 @@ public final class HomeConfig {
     public static final String DEFAULT = "# HomeTTY configuration\n[home]\ncolumns = 4\nclock = true\ndock = true\n\n[ai]\nenabled = false\n\n[security]\nlock_terminal = false\nlock_settings = false\nlock_apps = false\n\n[desktop]\nbackend = \"x11\"\n\n[privilege]\nrish = false\n";
     private final TomlParseResult values;
     public HomeConfig() throws IOException {
+        if (HomeArchive.needsRecovery(HOME)) throw new IOException("A Home restore needs recovery; open the HomeTTY Home screen first");
         if (!FILE.getParentFile().isDirectory() && !FILE.getParentFile().mkdirs()) throw new IOException("Cannot create configuration directory");
         DATA.mkdirs(); CACHE.mkdirs();
         if (!FILE.exists()) save(DEFAULT);
